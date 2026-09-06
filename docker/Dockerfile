@@ -24,6 +24,11 @@ RUN set -eux; \
 COPY vol_wrapper.py /opt/dfir/vol_wrapper.py
 COPY hardening/harden.yml /tmp/hardening/harden.yml
 RUN set -eux; \
+    # the wrapper is COPYed in with the build-context file's mode (0640) and
+    # owned by uid 0 — unreadable to the image's uid-2000 runtime, which would
+    # fail with `[Errno 13] Permission denied`. Make it world-readable+exec so
+    # the non-root ENTRYPOINT (python3 /opt/dfir/vol_wrapper.py) can open it.
+    chmod 0755 /opt/dfir/vol_wrapper.py; \
     ansible-playbook -c local -i localhost, /tmp/hardening/harden.yml; \
     rm -rf /usr/local/bin/ansible* /usr/local/lib/python3*/site-packages/ansible* \
            /etc/ansible /root/.ansible /tmp/hardening \
