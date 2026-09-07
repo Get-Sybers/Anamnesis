@@ -417,6 +417,111 @@ def test_dotted_computername_is_the_fqdn_l2t_rule():
     assert proc["fqdn"] == "HOST1.EXAMPLE.COM"           # the dotted name IS the fqdn
 
 
+def test_ls24_netbios_name_stamped_on_every_row_from_registry():
+    # The real LS24 dump's ComputerName is DESKTOP-M913391. A registry row shaped
+    # exactly like windows.piiat.registry emits (Key = <hive>\...\ComputerName\
+    # ComputerName, ValueName ComputerName) must stamp it as hostname on EVERY
+    # object that has a hostname field — the whole image is one host.
+    comp = _tag(normalize.normalize("windows.piiat.registry", {
+        "Hive": r"\REGISTRY\MACHINE\SYSTEM",
+        "Key": r"\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName",
+        "ValueName": "ComputerName", "ValueData": "DESKTOP-M913391",
+        "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
+    p = _tag(_proc(10, 4, 0xa, "x.exe", r"C:\x.exe", "2020-01-01T00:00:10+00:00"))
+    m = _tag(normalize.normalize("windows.piiat.modules", {
+        "OwnerOffset": 0xa, "PID": 10, "Base": 0x7ff0, "Name": "ntdll.dll",
+        "Path": r"C:\Windows\System32\ntdll.dll", "LoadTime": "2020-01-01T00:00:11+00:00"}))
+    out = enrich.enrich([comp, p, m])
+    by = {e["car_object"]: e for e in out}
+    assert by["process"]["hostname"] == "DESKTOP-M913391"
+    assert by["module"]["hostname"] == "DESKTOP-M913391"   # spoke stamped too
+    assert by["registry"]["hostname"] == "DESKTOP-M913391"  # the source row too
+    # no domain evidence -> fqdn is an honest null, not a fabricated one
+    assert by["process"].get("fqdn") is None
+
+
+def test_active_computername_is_the_hostname_fallback():
+    # The boot-time ComputerName key is absent/smeared, but the running
+    # ActiveComputerName subkey is resident — it still yields the host name.
+    active = _tag(normalize.normalize("windows.piiat.registry", {
+        "Hive": r"\REGISTRY\MACHINE\SYSTEM",
+        "Key": r"\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ActiveComputerName",
+        "ValueName": "ComputerName", "ValueData": "DESKTOP-M913391",
+        "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
+    p = _tag(_proc(10, 4, 0xa, "x.exe", r"C:\x.exe", "2020-01-01T00:00:10+00:00"))
+    out = enrich.enrich([active, p])
+    proc = [e for e in out if e["car_object"] == "process"][0]
+    assert proc["hostname"] == "DESKTOP-M913391"
+
+
+def test_boot_computername_wins_over_active_fallback():
+    boot = _tag(normalize.normalize("windows.piiat.registry", {
+        "Hive": r"\REGISTRY\MACHINE\SYSTEM",
+        "Key": r"\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName",
+        "ValueName": "ComputerName", "ValueData": "BOOTNAME",
+        "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
+    active = _tag(normalize.normalize("windows.piiat.registry", {
+        "Hive": r"\REGISTRY\MACHINE\SYSTEM",
+        "Key": r"\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ActiveComputerName",
+        "ValueName": "ComputerName", "ValueData": "RENAMED",
+        "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
+    p = _tag(_proc(10, 4, 0xa, "x.exe", r"C:\x.exe", "2020-01-01T00:00:10+00:00"))
+    out = enrich.enrich([boot, active, p])
+    proc = [e for e in out if e["car_object"] == "process"][0]
+    assert proc["hostname"] == "BOOTNAME"    # authoritative boot-time name wins
+
+
+def test_no_registry_leaves_hostname_honestly_null():
+    # windows.info carries no NetBIOS name; with no registry evidence hostname
+    # stays null rather than being faked from the dump filename.
+    p = _tag(_proc(10, 4, 0xa, "x.exe", r"C:\x.exe", "2020-01-01T00:00:10+00:00"))
+    out = enrich.enrich([p])
+    assert out[0].get("hostname") is None and out[0].get("fqdn") is None
+
+
+# ---- field-completeness pass: uid, login_successful ------------------------
+
+def test_login_successful_true_by_existence():
+    s = _tag(normalize.normalize("windows.piiat.sessions", {
+        "OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "SessionId": 1,
+        "LogonId": "0x338f0", "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve",
+        "CreateTime": "2020-01-01T00:00:10+00:00"}))
+    out = enrich.enrich([s])
+    sess = [e for e in out if e["car_object"] == "user_session"][0]
+    assert sess["login_successful"] is True     # a live token proves the logon
+    # built-in windows.sessions asserts it too
+    b = normalize.normalize("windows.sessions", {
+        "Session ID": 1, "User Name": "HOST\\jake", "Create Time": "2020-01-01T00:00:02+00:00",
+        "Process ID": 10, "Process": "x.exe"})
+    assert b["login_successful"] is True
+
+
+def test_process_uid_from_sid_and_spokes_inherit_it():
+    # process carries uid = its token SID (the generic account key); a
+    # thread/file spoke — which has a `uid` field but no `sid` field — inherits
+    # that SID into uid via the definitive owner link.
+    p = _tag(normalize.normalize("windows.piiat.processes", {
+        "Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
+        "ImageFileName": "x.exe", "Path": r"C:\x.exe", "CommandLine": "c",
+        "ParentPath": None, "CreateTime": "2020-01-01T00:00:10+00:00",
+        "DllCount": 0, "LoadedDlls": None, "Hidden": False,
+        "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve", "LogonId": "0x338f0"}))
+    assert p["uid"] == "S-1-5-21-1-2-3-1001" and p["sid"] == "S-1-5-21-1-2-3-1001"
+    t = _tag(normalize.normalize("windows.piiat.threads", {
+        "Offset": 9, "OwnerOffset": 0xa, "PID": 10, "TID": 7,
+        "CreateTime": "2020-01-01T00:00:20+00:00"}))
+    f = _tag(normalize.normalize("windows.piiat.files", {
+        "OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
+        "FileObjectOffset": 0xF11E, "Path": r"\Device\HarddiskVolume2\secret.docx",
+        "GrantedAccess": 3}))
+    out = enrich.enrich([p, t, f])
+    by = {e["car_object"]: e for e in out}
+    assert "sid" not in carmodel.fields("thread")   # uid is the only SID home
+    assert by["thread"]["uid"] == "S-1-5-21-1-2-3-1001"
+    assert by["file"]["uid"] == "S-1-5-21-1-2-3-1001"
+    assert by["file"]["user"] == "Steve"            # name inherited alongside
+
+
 def test_malfind_overlay_retrieves_stored_process_not_persisted(tmp_path):
     import json as _json
     from piiat_mem import cli

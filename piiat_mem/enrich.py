@@ -66,8 +66,11 @@ _WELL_KNOWN_SIDS = {
 
 # Process-context properties a spoke may inherit (filtered per object by the
 # CAR model, filled only where null). ppid: a spoke's CAR `ppid` means the
-# parent of the process it belongs to — the owner's own ppid.
-_INHERIT = ["exe", "image_path", "command_line", "user", "sid", "fqdn", "hostname", "ppid"]
+# parent of the process it belongs to — the owner's own ppid. uid: the owner's
+# account SID — the store-wide account key; thread/file/flow/service carry a
+# `uid` field (but no `sid`), so the owning process's SID is inherited into it.
+_INHERIT = ["exe", "image_path", "command_line", "user", "sid", "uid",
+            "fqdn", "hostname", "ppid"]
 
 
 def _populated(ev: dict) -> int:
@@ -188,7 +191,9 @@ def _collapse_mft(events: list[dict]) -> list[dict]:
 def _host_identity(events: list[dict]) -> dict:
     """image -> (hostname, fqdn), from the image's OWN registry evidence (the
     plugin's default target list already extracts both keys):
-    - hostname: ...\\Control\\ComputerName\\ComputerName, or
+    - hostname: ...\\Control\\ComputerName\\ComputerName (boot-time name),
+      falling back to ...\\ComputerName\\ActiveComputerName (the running name,
+      resident even when the boot key is smeared) or
       ...\\Services\\Tcpip\\Parameters (Hostname / NV Hostname)
     - domain:   ...\\Tcpip\\Parameters Domain (preferred) else DhcpDomain
     The hostname/fqdn split follows the SAME convention as the DX_DFIR
@@ -196,8 +201,14 @@ def _host_identity(events: list[dict]) -> dict:
     preprocessing and stamps every event; the CAR layer splits on a dot):
     a dotted name IS the fqdn (hostname = its first label); otherwise
     fqdn = hostname.domain where a domain is known. Definitive per artefact —
-    the whole image IS one host, so the identity applies to every event."""
-    host, dom_pref, dom_fallback = {}, {}, {}
+    the whole image IS one host, so the identity applies to every event.
+
+    windows.info carries no NetBIOS name (only kernel/OS build metadata) — the
+    registry ComputerName is the sole memory-native source, so a run that omits
+    the registry plugin honestly leaves hostname null rather than guessing it."""
+    # host = boot-time ComputerName (authoritative); host_active = the running
+    # ActiveComputerName / Tcpip Hostname fallback used only where host is absent.
+    host, host_active, dom_pref, dom_fallback = {}, {}, {}, {}
     for ev in events:
         if ev["car_object"] != "registry":
             continue
@@ -209,15 +220,18 @@ def _host_identity(events: list[dict]) -> dict:
             continue
         if key.endswith("\\Control\\ComputerName\\ComputerName") and val == "ComputerName":
             host.setdefault(img, str(data))
+        elif key.endswith("\\Control\\ComputerName\\ActiveComputerName") and val == "ComputerName":
+            host_active.setdefault(img, str(data))
         elif key.endswith("\\Tcpip\\Parameters"):
             if val in ("Hostname", "NV Hostname"):
-                host.setdefault(img, str(data))
+                host_active.setdefault(img, str(data))
             elif val == "Domain":
                 dom_pref.setdefault(img, str(data))
             elif val == "DhcpDomain":
                 dom_fallback.setdefault(img, str(data))
     out = {}
-    for img, h in host.items():
+    for img in set(host) | set(host_active):
+        h = host.get(img) or host_active.get(img)
         if "." in h:                       # a dotted name IS the fqdn (l2t rule)
             out[img] = (h.split(".", 1)[0], h)
             continue
