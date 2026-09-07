@@ -194,6 +194,21 @@ mismatch, previous_creation_time — the timestomp tell). Remaining nulls are
 honest: hashes/signers (unmapped file bytes), call_trace (ephemeral), thread
 src_pid (not recorded), flow byte counters (not in a snapshot).
 
+A follow-up completeness pass filled three more provably-derivable fields: (1)
+`user_session.login_successful = true` — an access token bearing the
+AuthenticationId LUID exists only because LSA completed the logon, the same
+"the observation proves the constant" rule as `socket.success`; (2) `uid` (the
+generic account key = the token SID) on `process`, and inherited into the
+spokes that carry a `uid` field but no `sid` field (thread/file/flow/service),
+so the account SID has a canonical home store-wide; (3) host identity is
+hardened — the registry plugin now targets the whole `…\Control\ComputerName`
+key so both the boot-time `ComputerName` and the running `ActiveComputerName`
+are captured, and `_host_identity` falls back to `ActiveComputerName` (then
+Tcpip `Hostname`) when the boot-time value is smeared. `windows.info` carries
+no NetBIOS name (only kernel/OS build metadata), so the registry ComputerName
+is the sole memory-native host source; a run without the registry plugin leaves
+hostname honestly null rather than faking it from the dump filename.
+
 **Triggers vs records (malfind):** malfind is a *trigger*, not a stored CAR
 record — it is never written to the store. At output, each flagged region is
 joined by PID to the process already in the store and a `module` timeline entry

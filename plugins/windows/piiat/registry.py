@@ -42,7 +42,15 @@ _DEFAULT_TARGETS = [
     r"Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
     # HKLM\SYSTEM — services, devices, config
     r"ControlSet001\Services",
-    r"ControlSet001\Control\ComputerName\ComputerName",
+    # The ComputerName PARENT (recurse=True) so BOTH the boot-time ComputerName
+    # and the running ActiveComputerName subkeys are captured — the host
+    # identity the CAR layer stamps on every row (docs/design/car-store.md:
+    # hostname/fqdn). windows.info carries no NetBIOS name, so this registry
+    # value is the sole memory-native source of the host's real name.
+    r"ControlSet001\Control\ComputerName",
+    # Tcpip\Parameters explicitly (Hostname / Domain / DhcpDomain -> the fqdn) —
+    # reliable and cheap rather than relying on the whole \Services recursion.
+    r"ControlSet001\Services\Tcpip\Parameters",
     r"ControlSet001\Control\TimeZoneInformation",
     r"ControlSet001\Control\Session Manager\AppCompatibility\AppCompatCache",
     r"ControlSet001\Control\Session Manager\Memory Management",

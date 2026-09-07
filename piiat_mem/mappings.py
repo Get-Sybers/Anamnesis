@@ -153,8 +153,12 @@ MAPPINGS = {
             "command_line": "CommandLine",
             "parent_exe": basename("ParentPath"), "parent_image_path": "ParentPath",
             # token-derived identity (v0.4.0): the process's own SID and user —
-            # native extraction, not a weak join.
-            "user": "User", "sid": "Sid",
+            # native extraction, not a weak join. `uid` is the SAME token SID:
+            # CAR keeps both a Windows-specific `sid` and a generic `uid`, and
+            # the account's unique id in a Windows image IS its SID — so uid is
+            # filled from it too (the store-wide account key the spokes inherit;
+            # thread/file/flow/service have a `uid` field but no `sid` field).
+            "user": "User", "sid": "Sid", "uid": "Sid",
             # completeness pass: PEB CurrentDirectory + token mandatory label
             "current_working_directory": "Cwd",
             "integrity_level": "IntegrityLevel",
@@ -246,7 +250,11 @@ MAPPINGS = {
         # number. Rows collapse to one login per LUID in enrichment.
         "object": "user_session", "action": "login", "ts": "CreateTime",
         "guid": {"fields": ["LogonId"]}, "owning_pid": "PID", "owning_offset": "OwnerOffset",
-        "props": {"user": "User", "login_id": "LogonId", "uid": "Sid"},
+        # login_successful is proven by existence: an access token bearing this
+        # AuthenticationId LUID exists only because LSA completed the logon (the
+        # same "the observation proves the constant" logic as socket.success).
+        "props": {"user": "User", "login_id": "LogonId", "uid": "Sid",
+                  "login_successful": const(True)},
         "keep": ["SessionId", "ProcessName", "Sid"],
     },
     # ---- thread — _ETHREAD offset is identity; owns via PID -----------------
@@ -334,7 +342,10 @@ MAPPINGS = {
     "windows.sessions": {
         "object": "user_session", "action": "login", "ts": "Create Time",
         "guid": {"fields": ["Session ID", "User Name"]}, "owning_pid": "Process ID",
-        "props": {"user": "User Name", "login_id": "Session ID"},
+        # a session with live processes proves the logon completed (see the
+        # piiat.sessions note) — login_successful is true by existence.
+        "props": {"user": "User Name", "login_id": "Session ID",
+                  "login_successful": const(True)},
         "keep": ["Session Type", "Process"],
     },
 }
