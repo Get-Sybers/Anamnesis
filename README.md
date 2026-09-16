@@ -74,10 +74,10 @@ store's `image_context` table — they are not CAR objects.
   parent's full path, loaded DLLs, and a `Hidden` flag for processes the active
   list missed. It rebuilds the process address space from the DTB so the PEB
   resolves even for unlinked processes.
-- **`windows.piiat.registry`** — reads a RECmd-batch-style list of
-  high-value keys out of the hives resident in memory and emits one row per
-  value (Hive, Key, ValueName, ValueType, ValueData, LastWrite). Override with
-  `--plugins` or the plugin's `--targets`.
+- **`windows.piiat.registry`** — reads a curated list of high-value keys out
+  of the hives resident in memory and emits one row per value (Hive, Key,
+  ValueName, ValueType, ValueData, LastWrite). Override with `--plugins` or
+  the plugin's `--targets`.
 
 ## Backends
 
@@ -98,13 +98,16 @@ pip install .            # the piiat-mem CLI (container backend)
 pip install .[native]    # also pull in volatility3 for --native
 ```
 
-## As a submodule
+## In a pipeline
 
-PIIAT-Mem stays a standalone tool inside a larger pipeline: the parent repo
-builds the image from `docker/Dockerfile` and drives PIIAT-Mem **through its
-CLI** — one invocation per image, as an automated consumer, not by importing its
-internals. It never has to re-implement the runner, the `jsonl_dfir` renderer or
-the plugin set. Two flags exist for exactly that automated use:
+PIIAT-Mem stays a standalone tool inside a larger pipeline: a consumer clones
+this repo at a pinned commit and bakes it into its own hardened image with
+Volatility 3 in-process (`get-sybers/piiat-mem`, built by GoDFIR-toolz's
+`piiat-mem/Dockerfile`, is exactly that), then drives PIIAT-Mem **through its
+CLI** (`python3 -m piiat_mem --native …`) — one invocation per image, as an
+automated consumer, not by importing its internals. It never has to
+re-implement the runner, the `jsonl_dfir` renderer or the plugin set. Two flags
+exist for exactly that automated use:
 
 ```
 piiat-mem -f mem.raw -o out/ --plugins windows.pslist,windows.piiat.processes --no-timeline

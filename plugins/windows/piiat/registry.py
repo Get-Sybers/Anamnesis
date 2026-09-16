@@ -1,9 +1,8 @@
 """Volatility 3 plugin: targeted registry values for the CAR data model.
 
-`windows.piiat.registry` — instead of dumping whole hives, it reads only the
-forensically-relevant keys (the same target list Eric Zimmerman's RECmd batch
-uses on disk) out of the registry hives that are resident IN MEMORY, and emits
-one row per value:
+`windows.piiat.registry` — instead of dumping whole hives, it reads only a
+curated list of forensically-relevant keys out of the registry hives that are
+resident IN MEMORY, and emits one row per value:
 
   Hive        the hive the value came from (…\\NTUSER.DAT, …\\SOFTWARE, …)
   Key         the full key path
@@ -15,7 +14,7 @@ one row per value:
 Every target is tried against every hive; get_key raises for hives that lack it,
 so a key simply lands in whichever hive(s) actually hold it (HKLM\\SOFTWARE keys
 in SOFTWARE, per-user keys in each NTUSER.DAT/UsrClass.dat). Override the list
-with --targets "a\\b,c\\d" to match a specific RECmd batch.
+with --targets "a\\b,c\\d" to target a specific key list.
 
 Rendered by the jsonl_dfir renderer -> memory.VolatilityJson (Plugin =
 "windows.piiat.registry") -> CarRegistry reads Record.Key/ValueName/…
@@ -27,8 +26,8 @@ from volatility3.framework.symbols.windows.extensions.registry import RegValueTy
 from volatility3.plugins.windows.registry import hivelist, printkey
 
 
-# RECmd-batch style target list: the high-value keys across the machine and user
-# hives. HKLM\SOFTWARE / HKLM\SYSTEM keys use their in-hive path; NTUSER / UsrClass
+# Curated target list: the high-value keys across the machine and user hives.
+# HKLM\SOFTWARE / HKLM\SYSTEM keys use their in-hive path; NTUSER / UsrClass
 # keys carry the "Software\" prefix. A target that a given hive lacks is skipped.
 _DEFAULT_TARGETS = [
     # HKLM\SOFTWARE — autoruns, install, OS
@@ -69,7 +68,7 @@ _DEFAULT_TARGETS = [
 
 
 class Registry(interfaces.plugins.PluginInterface):
-    """Targeted (RECmd-list) registry values recovered from memory hives."""
+    """Targeted registry values recovered from memory hives."""
 
     _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
@@ -123,9 +122,9 @@ class Registry(interfaces.plugins.PluginInterface):
                         value_type = ""
                     try:
                         data = node.decode_data()
-                        # Decode by type the way RECmd/Registry Explorer present it:
-                        # string types -> UTF-16LE text, numbers -> decimal, and
-                        # everything else (REG_BINARY/REG_NONE/…) -> hex.
+                        # Decode by value type: string types -> UTF-16LE text,
+                        # numbers -> decimal, and everything else
+                        # (REG_BINARY/REG_NONE/…) -> hex.
                         if isinstance(data, int):
                             value_data = str(data)
                         elif isinstance(data, bytes):
