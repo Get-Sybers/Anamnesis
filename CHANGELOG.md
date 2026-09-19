@@ -20,7 +20,7 @@ identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consum
   carries a clear "no backend" stub so the pipeline builds and tests with no
   native library.
 - **Pipeline ported to Go.** normalize → enrich → store → timeline, a faithful
-  port of the `piiat_mem` package, with SQLite via the cgo-free
+  port of the original Python package, with SQLite via the cgo-free
   `modernc.org/sqlite`. Every case from the old `tests/test_car_pipeline.py` is a
   Go table test and passes (definitive/heuristic linking, host identity, session
   collapse, MFT merge, ProfileList SID resolution, dedupe, malfind overlay).
@@ -30,7 +30,7 @@ identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consum
   handle's object IS the target `_EPROCESS`, so access-target links are definitive.
 - **CLI + env-driven batch** (`ANAMNESIS_*`) reproduce the old single-image CLI and
   the self-orchestrating container contract (one JSON summary line, exit 0/1/2).
-- **Removed.** The `piiat_mem` Python package, the `windows.piiat.*` Volatility
+- **Removed.** The old Python package, the `windows.piiat.*` Volatility
   plugins, the `jsonl_dfir` renderer, and the `docker/` Volatility image — the
   hardened image is now built by GoDFIR-toolz around the Go binary + MemProcFS libs.
 
@@ -41,7 +41,7 @@ SID→name, and the forensic MFT/filescan/malfind collectors — all marked
 
 ## [1.0.0] - 2026-08-29
 
-First stable release. PIIAT-Mem turns a memory image into a **MITRE CAR** event
+First stable release. Anamnesis turns a memory image into a **MITRE CAR** event
 store and timeline — Plaso-shaped (extract → normalize → enrich → store →
 output) — consolidating the 0.2–0.4 development arc into a stable interface:
 
@@ -233,7 +233,7 @@ Detailed change history for the pre-1.0 milestones is retained below.
 ## [0.1.0] - 2026-08-28
 
 ### Added
-- Initial release. `piiat-mem -f <image> -o <out>` runs Volatility 3 over a
+- Initial release. `anamnesis -f <image> -o <out>` runs Volatility 3 over a
   memory image and writes a time-ordered timeline (`timeline.json` JSONL or
   `--format csv`) alongside the raw per-plugin JSONL.
 - Custom Volatility 3 plugins: `dfir_processes.DfirProcesses` (psscan-based
