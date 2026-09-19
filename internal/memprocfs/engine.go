@@ -5,7 +5,7 @@
 //
 // The definitive-link identity is the process's _EPROCESS virtual address
 // (Process.EPROCESS): the collectors stamp it as the process guid
-// ("proc-<hex>") and as every spoke's OwnerOffset, exactly as the Volatility
+// ("proc-<hex>") and as every spoke's OwnerOffset, exactly as the
 // windows.piiat.* plugins did — so enrichment links by the kernel's own pointer,
 // not the reused PID.
 package memprocfs

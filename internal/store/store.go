@@ -1,7 +1,7 @@
 // Package store is the CAR-event store — SQLite, the .plaso analogue. One table
 // per CAR object (all 13 from the model, empty where memory has nothing), each
 // with a common event header plus that object's canonical properties as nullable
-// columns. Faithful port of piiat_mem/store.py.
+// columns. Faithful port of the original Python store.py.
 //
 // SQLite is modernc.org/sqlite — a pure-Go, cgo-free driver — so anamnesis builds
 // with CGO_ENABLED=0.

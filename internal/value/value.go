@@ -1,5 +1,5 @@
 // Package value holds the loose value coercions the CAR pipeline needs. Records
-// and events are map[string]any (the faithful analogue of PIIAT-Mem's Python
+// and events are map[string]any (the faithful analogue of the original Python
 // dicts): values arrive as native Go integers from the collectors, or as
 // json.Number from JSONL loaded with a number-preserving decoder (never float64,
 // so 64-bit offsets keep full precision). These helpers read them uniformly.
@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-// IsBlank reports whether v is one of PIIAT-Mem's "empty" sentinels: nil, "" or
+// IsBlank reports whether v is one of the pipeline's "empty" sentinels: nil, "" or
 // "-" (normalize._blank).
 func IsBlank(v any) bool {
 	if v == nil {

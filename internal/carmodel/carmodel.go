@@ -4,7 +4,7 @@
 // the store's table schemas and the wide timeline's property superset both derive
 // from here: a model refresh is a data change, not a code change.
 //
-// Faithful port of piiat_mem/carmodel.py. Object order is preserved from the JSON
+// Faithful port of the original Python carmodel.py. Object order is preserved from the JSON
 // (insertion order in the Python dict) so table creation and CSV/timeline object
 // iteration stay deterministic.
 package carmodel

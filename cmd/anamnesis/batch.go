@@ -15,7 +15,7 @@ import (
 )
 
 // The env-driven batch orchestrator — the container ENTRYPOINT. Faithful port of
-// GoDFIR-toolz/piiat-mem/piiat_mem_batch.py, with the ANAMNESIS_* env contract.
+// the original Python batch script, with the ANAMNESIS_* env contract.
 //
 //	ANAMNESIS_MEMORY_DIR     memory image tree, recursed        (default /mem)
 //	ANAMNESIS_OUT_DIR        output root, one folder per image  (default /out)

@@ -20,7 +20,7 @@ identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consum
   carries a clear "no backend" stub so the pipeline builds and tests with no
   native library.
 - **Pipeline ported to Go.** normalize → enrich → store → timeline, a faithful
-  port of the `piiat_mem` package, with SQLite via the cgo-free
+  port of the original Python package, with SQLite via the cgo-free
   `modernc.org/sqlite`. Every case from the old `tests/test_car_pipeline.py` is a
   Go table test and passes (definitive/heuristic linking, host identity, session
   collapse, MFT merge, ProfileList SID resolution, dedupe, malfind overlay).
@@ -30,7 +30,7 @@ identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consum
   handle's object IS the target `_EPROCESS`, so access-target links are definitive.
 - **CLI + env-driven batch** (`ANAMNESIS_*`) reproduce the old single-image CLI and
   the self-orchestrating container contract (one JSON summary line, exit 0/1/2).
-- **Removed.** The `piiat_mem` Python package, the `windows.piiat.*` Volatility
+- **Removed.** The old Python package, the `windows.piiat.*` Volatility
   plugins, the `jsonl_dfir` renderer, and the `docker/` Volatility image — the
   hardened image is now built by GoDFIR-toolz around the Go binary + MemProcFS libs.
 

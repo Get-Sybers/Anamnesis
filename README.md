@@ -8,9 +8,9 @@ deliverable is finished [MITRE CAR](https://car.mitre.org/data_model/): every
 extractable record becomes a CAR **object** doing an **action** at a **timestamp**,
 carrying that object's canonical **properties**.
 
-anamnesis is the successor to PIIAT-Mem: same CAR output contract (`car.db`,
-`timeline.json`, per-object CSVs), a native engine in place of the Volatility 3
-Python engine. See [docs/design/native-engine.md](docs/design/native-engine.md).
+anamnesis keeps the same CAR output contract (`car.db`, `timeline.json`,
+per-object CSVs) but replaces the Volatility 3 Python engine with a native one.
+See [docs/design/native-engine.md](docs/design/native-engine.md).
 
 ```
 anamnesis -f memory.raw -o out/                 # CAR store + wide JSONL timeline
@@ -40,7 +40,7 @@ engine (byakugan) joins on. See [docs/design/car-store.md](docs/design/car-store
 
 ## What it runs
 
-Each collector maps to one CAR object, keeping the PIIAT plugin name (the output and
+Each collector maps to one CAR object, keeping its plugin name (the output and
 idempotency contract). The native source is MemProcFS; the record shape is unchanged.
 
 | collector | CAR object / action | source (MemProcFS) |
@@ -84,7 +84,7 @@ anamnesis stays a standalone tool inside a larger pipeline. In **DX_DFIR** it ru
 the hardened, env-driven `get-sybers/anamnesis` container: with no arguments it
 discovers every image under `ANAMNESIS_MEMORY_DIR` and writes
 `<out>/<image>/plugins/<plugin>.jsonl` + `car.db`, printing one JSON summary line —
-a drop-in for the old `get-sybers/piiat-mem` invocation.
+a drop-in for the previous memory-lane container invocation.
 
 ```
 docker run --rm --network none --read-only --tmpfs /tmp \

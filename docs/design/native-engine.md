@@ -1,18 +1,18 @@
 # anamnesis — native (Go / MemProcFS) engine
 
-Tracks the rewrite that removes Volatility 3 (and its Python engine) from the
-memory-forensics lane. This is the design of record for **anamnesis**, the pure-Go
-successor to PIIAT-Mem. It supersedes the Volatility runner (`piiat_mem/runner.py`,
-`piiat_mem/container.py`), the custom Volatility plugins (`plugins/windows/piiat/*`)
-and the `jsonl_dfir` renderer — none of which survive the rename. It **keeps** the
+This is the design of record for **anamnesis**, the pure-Go rewrite that removed
+Volatility 3 (and its Python engine) from the memory-forensics lane. It supersedes
+the old Volatility runner and
+container, the custom Volatility plugins and the `jsonl_dfir` renderer — none of
+which survive the rewrite. It **keeps** the
 CAR data model and the normalize → enrich → store → output pipeline, re-implemented
 in Go, and it keeps the external output contract byte-for-byte where consumers depend
 on it (see §4).
 
 ## 0. Why
 
-PIIAT-Mem drives Volatility 3 — which *is* Python, irreducibly — over a memory image.
-Even fused into a hardened container (`get-sybers/piiat-mem`), that means a Python
+The previous implementation drove Volatility 3 — which *is* Python, irreducibly — over
+a memory image. Even fused into a hardened container, that means a Python
 runtime, `pip install volatility3`, the ISF symbol dance, and the general weight and
 speed of the Python engine. The DX_DFIR / GoDFIR-toolz ecosystem has already replaced
 its other Python DFIR tools with static Go binaries (goevtx, gomft, gore, goese,
@@ -45,7 +45,7 @@ LeechCore `file://` device; no kernel driver, no live target.
 
 MemProcFS resolves kernel/type offsets from its bundled `info.db` and, for full
 fidelity, PDBs from the Microsoft Symbol Server on first use (the analogue of
-Volatility's ISF fetch). anamnesis keeps the same offline-first posture as PIIAT-Mem:
+Volatility's ISF fetch). anamnesis keeps an offline-first posture:
 default `--network none`, pre-seed a symbol/PDB cache; `--symbols-online`
 (`ANAMNESIS_SYMBOLS_ONLINE`) is the knob that documents a run given network for the
 fetch. Much of the process/handle/module/network surface resolves from `info.db`
@@ -77,15 +77,15 @@ predicates, collector functions), never the tables:
   curated registry targets.
 - `internal/carmodel/car_data_model.json` — the vendored MITRE model (upstream JSON).
 
-Data flow (Plaso-shaped, unchanged from PIIAT-Mem): **extract → normalize → store →
-output**. Collectors are the Volatility-plugin analogues; each emits raw records under
+Data flow (Plaso-shaped, unchanged): **extract → normalize → store →
+output**. Collectors are the extraction analogues; each emits raw records under
 the **same field/column names** the old per-plugin JSONL used, so the normalize maps
 (and the golden tests) port across verbatim. The raw per-collector JSONL is retained
 for traceability under `plugins/<name>.jsonl` (see §4 on why the name stays).
 
 ### 2.1 Collectors ↔ MemProcFS ↔ CAR
 
-Every collector keeps its PIIAT plugin *name* (the identity the pipeline and idempotency
+Every collector keeps its plugin *name* (the identity the pipeline and idempotency
 key on) and emits the columns `normalize` already expects. The native source changes;
 the record shape does not.
 
@@ -109,16 +109,16 @@ the record shape does not.
 | `windows.info`, `banners.Banners` | image_context | `ConfigGet` version/build + `GetKObjectList` metadata | image metadata, not CAR objects |
 
 Anything MemProcFS cannot supply for a field stays **honestly null** — the same rule
-PIIAT-Mem already follows (no near-miss fills; §3 of `car-store.md`).
+the pipeline has always followed (no near-miss fills; §3 of `car-store.md`).
 
 ## 3. Fidelity: the definitive-link guarantee is preserved
 
-The value of PIIAT-Mem is that a spoke (thread/module/handle) links to its owning
+The value of this design is that a spoke (thread/module/handle) links to its owning
 process by the kernel's own pointer — the `_EPROCESS` object address — not by the
 reused PID (`docs/design/car-store.md` §3). MemProcFS exposes each process's
 `EPROCESS` virtual address (`GetProcessInfoAll`), and its per-process module/thread/
 handle enumerations are produced *from* that `EPROCESS`, so anamnesis emits
-`OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the Volatility
+`OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the
 `windows.piiat.*` plugins did. `enrich` is unchanged: join on `OwnerOffset` →
 `link_confidence="definitive"`, else the `(pid, create-time window)` join →
 `"heuristic"`. `process.guid = "proc-<hex EPROCESS VA>"` and `native.Offset =
@@ -130,9 +130,9 @@ byakugan declares in `sources/memory.yaml` (`identity.external: memory_proc_offs
 Downstream consumers were audited:
 
 - **byakugan** (`sources/memory.yaml`): `input_pattern: car.db`, `mappings: []` —
-  it passes PIIAT's finished CAR through **1:1** and joins on `memory_proc_offset`.
+  it passes the finished CAR through **1:1** and joins on `memory_proc_offset`.
   **`car.db` is the hard contract.**
-- **DX_DFIR** volatility lane: `docker run`s the image, reads the per-image output
+- **DX_DFIR** memory lane: `docker run`s the image, reads the per-image output
   tree; the CAR lane feeds byakugan the `car.db`.
 
 anamnesis therefore reproduces, per image:
@@ -144,13 +144,13 @@ anamnesis therefore reproduces, per image:
   events + the malfind overlay (standalone / non-`--no-timeline`).
 - `car/<object>.csv` — per-object CSV (`--format csv`).
 - `plugins/<name>.jsonl` — raw per-collector records, for traceability. The names
-  stay the Volatility plugin ids (`windows.piiat.processes`, …) because the batch
-  idempotency and PIIAT plugin-set selection (`--plugins`, `PIIAT/ANAMNESIS_PLUGINS`)
+  stay the same plugin ids (`windows.piiat.processes`, …) because the batch
+  idempotency and plugin-set selection (`--plugins`, `ANAMNESIS_PLUGINS`)
   key on them; the *columns* are anamnesis's own but mirror the old ones.
 
 The env-driven batch contract (self-orchestrating container) is reproduced with the
 renamed env vars (§6): discover images, per-plugin idempotency, one JSON summary line,
-exit codes 0/1/2 — identical semantics to `piiat_mem_batch.py`.
+exit codes 0/1/2 — identical semantics to the previous Python batch script.
 
 ## 5. Testing
 
@@ -172,7 +172,7 @@ The user's directive is a full rename ("everything"). Layers:
    Go module `anamnesis`.
 2. **Docker image** `get-sybers/piiat-mem` → `get-sybers/anamnesis`;
    **env contract** `PIIAT_*` → `ANAMNESIS_*` (GoDFIR-toolz Dockerfile + build-all.sh,
-   DX_DFIR ansible volatility lane, `images.yml`, Go health check).
+   DX_DFIR ansible memory lane, `images.yml`, Go health check).
 3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/Anamnesis` — done by the owner
    in GitHub settings, and it must happen **before the images are built**: the
    GoDFIR-toolz Dockerfile clones `Get-Sybers/Anamnesis` at the `sources.yml` pin, so
@@ -190,7 +190,7 @@ runtime carrying the `anamnesis` binary + MemProcFS `.so` files (fetched + check
 pinned from the MemProcFS release), the shared hardener (uid renamed/locked, no shell,
 no package manager), and the same batch ENTRYPOINT semantics. No Python, no Volatility,
 no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out …` with
-`ANAMNESIS_*` env — a drop-in for the current `get-sybers/piiat-mem` invocation.
+`ANAMNESIS_*` env — a drop-in for the previous memory-image invocation.
 
 ## 8. Phasing / status
 

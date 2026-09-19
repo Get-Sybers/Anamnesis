@@ -1,6 +1,6 @@
 # CAR-event store — relational model (Phase 1)
 
-Tracks epic #1. This is the **relational design** the store is built on: the CAR
+This is the **relational design** the store is built on: the CAR
 objects, what makes each event unique, how the objects relate, and the identity
 key each object needs to **inherit** properties from a related entry. Source of
 truth for objects / actions / properties: `internal/carmodel/car_data_model.json`
@@ -165,7 +165,7 @@ renames since the old file: `flow.protocol` → `transport_protocol` (+`applicat
 `tcp_flags`), `registry.edit` → `key_edit`/`value_edit`, `user_session.logon_id` →
 `login_id` (the interactive/local/rdp/remote actions folded into a `login_type`
 field). `mappings.py` targets these authoritative names; the KQL `Car*` views still
-use the old names and need the same alignment (deferred — see the volatility lane).
+use the old names and need the same alignment (deferred — see the memory lane).
 
 ---
 

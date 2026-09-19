@@ -1,6 +1,6 @@
 // Package normalize turns one raw collector record into one MITRE CAR event.
 //
-// Faithful port of piiat_mem/normalize.py + piiat_mem/mappings.py. Normalize
+// Faithful port of the original Python normalize.py + mappings.py. Normalize
 // applies the plugin's map (picking the matching variant where the plugin splits
 // across objects) and returns one CAR event: car_object, car_action, timestamp,
 // the synthesized guid (the object's reuse-proof identity), owning_pid/parent_pid
@@ -22,10 +22,10 @@ import (
 // Documents and Settings\<name>\ (XP), and Windows service profiles.
 var reHiveUser = regexp.MustCompile(`(?i)(?:Documents and Settings|Users|ServiceProfiles)\\([^\\]+)\\`)
 
-// Volatility's "no time" sentinels (epoch-zero renderings) — treated as no timestamp.
+// "No time" sentinels (epoch-zero renderings) — treated as no timestamp.
 var reEpochZero = regexp.MustCompile(`^(1601-01-01|1970-01-01|0001-01-01|1600-12-)`)
 
-// Layer-4 protocol / address family from Volatility's Proto ("TCPv4").
+// Layer-4 protocol / address family from the Proto field ("TCPv4").
 var reProto = regexp.MustCompile(`(?i)^([a-z]+?)(v(4|6))?$`)
 
 // winBasename is ntpath.basename: the part after the last \ or / (whole string
