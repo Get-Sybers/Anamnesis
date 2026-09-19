@@ -9,27 +9,27 @@ import (
 	"sort"
 	"strings"
 
-	"flashback/internal/collect"
-	"flashback/internal/memprocfs"
-	"flashback/internal/pipeline"
+	"anamnesis/internal/collect"
+	"anamnesis/internal/memprocfs"
+	"anamnesis/internal/pipeline"
 )
 
 // The env-driven batch orchestrator — the container ENTRYPOINT. Faithful port of
-// GoDFIR-toolz/piiat-mem/piiat_mem_batch.py, with the FLASHBACK_* env contract.
+// GoDFIR-toolz/piiat-mem/piiat_mem_batch.py, with the ANAMNESIS_* env contract.
 //
-//	FLASHBACK_MEMORY_DIR     memory image tree, recursed        (default /mem)
-//	FLASHBACK_OUT_DIR        output root, one folder per image  (default /out)
-//	FLASHBACK_SYMBOLS_DIR    PDB/symbol cache (read-write)      (default /symbols)
-//	FLASHBACK_PLUGINS        comma-separated collectors; empty = the default CAR set
-//	FLASHBACK_FORCE          1/true/yes/on: rerun collectors with valid output
-//	FLASHBACK_SYMBOLS_ONLINE 1/true/yes/on: this container has network for PDB fetch
-//	FLASHBACK_VMM_LIB        path to the MemProcFS vmm library
+//	ANAMNESIS_MEMORY_DIR     memory image tree, recursed        (default /mem)
+//	ANAMNESIS_OUT_DIR        output root, one folder per image  (default /out)
+//	ANAMNESIS_SYMBOLS_DIR    PDB/symbol cache (read-write)      (default /symbols)
+//	ANAMNESIS_PLUGINS        comma-separated collectors; empty = the default CAR set
+//	ANAMNESIS_FORCE          1/true/yes/on: rerun collectors with valid output
+//	ANAMNESIS_SYMBOLS_ONLINE 1/true/yes/on: this container has network for PDB fetch
+//	ANAMNESIS_VMM_LIB        path to the MemProcFS vmm library
 //
 // Output per image: <out>/<clean name>/plugins/<plugin>.jsonl + car.db +
-// flashback.log. stdout: one JSON summary line. Exit 0 normal, 1 nothing
+// anamnesis.log. stdout: one JSON summary line. Exit 0 normal, 1 nothing
 // produced/nothing done, 2 config error.
 
-const tool = "flashback"
+const tool = "anamnesis"
 
 var pluginRe = regexp.MustCompile(`\A[A-Za-z0-9][A-Za-z0-9_.]*\z`)
 
@@ -70,7 +70,7 @@ func envStr(name, def string) string {
 func envBool(name string) bool { return trueSet[strings.ToLower(strings.TrimSpace(os.Getenv(name)))] }
 
 func envPlugins() []string {
-	raw := os.Getenv("FLASHBACK_PLUGINS")
+	raw := os.Getenv("ANAMNESIS_PLUGINS")
 	var safe []string
 	for _, p := range strings.Split(raw, ",") {
 		p = strings.TrimSpace(p)
@@ -91,12 +91,12 @@ func envPlugins() []string {
 
 func runBatch() int {
 	sum := process(
-		envStr("FLASHBACK_MEMORY_DIR", "/mem"),
-		envStr("FLASHBACK_OUT_DIR", "/out"),
-		envStr("FLASHBACK_SYMBOLS_DIR", "/symbols"),
+		envStr("ANAMNESIS_MEMORY_DIR", "/mem"),
+		envStr("ANAMNESIS_OUT_DIR", "/out"),
+		envStr("ANAMNESIS_SYMBOLS_DIR", "/symbols"),
 		envPlugins(),
-		envBool("FLASHBACK_FORCE"),
-		envBool("FLASHBACK_SYMBOLS_ONLINE"),
+		envBool("ANAMNESIS_FORCE"),
+		envBool("ANAMNESIS_SYMBOLS_ONLINE"),
 	)
 	if sum.Error != "" {
 		fmt.Fprintln(os.Stderr, sum.Error)
@@ -120,14 +120,14 @@ func process(memoryDir, outDir, symbolsDir string, plugins []string, force, symb
 		SymbolsOnline: symbolsOnline, Force: force, Plugins: len(plugins), Results: []perImage{}}
 
 	if fi, err := os.Stat(memoryDir); err != nil || !fi.IsDir() {
-		sum.Error = fmt.Sprintf("memory dir not found or not a directory: %s (mount it, or set FLASHBACK_MEMORY_DIR)", memoryDir)
+		sum.Error = fmt.Sprintf("memory dir not found or not a directory: %s (mount it, or set ANAMNESIS_MEMORY_DIR)", memoryDir)
 		return sum
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		sum.Error = fmt.Sprintf("output dir not writable: %s (%v)", outDir, err)
 		return sum
 	}
-	probe := filepath.Join(outDir, ".flashback-write-probe")
+	probe := filepath.Join(outDir, ".anamnesis-write-probe")
 	if err := os.WriteFile(probe, nil, 0o644); err != nil {
 		sum.Error = fmt.Sprintf("output dir not writable: %s (%v)", outDir, err)
 		return sum
@@ -173,7 +173,7 @@ func process(memoryDir, outDir, symbolsDir string, plugins []string, force, symb
 			fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — produced %d, empty %d\n",
 				tool, idx+1, len(images), rel, len(pi.Produced), len(pi.Empty))
 			if logTail != "" && len(pi.Produced) == 0 {
-				diagTails = append(diagTails, fmt.Sprintf("--- %s (flashback.log) ---\n%s", rel, logTail))
+				diagTails = append(diagTails, fmt.Sprintf("--- %s (anamnesis.log) ---\n%s", rel, logTail))
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — all %d collector(s) already done\n",
@@ -192,13 +192,13 @@ func process(memoryDir, outDir, symbolsDir string, plugins []string, force, symb
 // rebuilds car.db from all raw JSONL on disk. Returns a short log tail for
 // diagnostics when the run produced nothing.
 func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline bool) string {
-	logPath := filepath.Join(dest, "flashback.log")
+	logPath := filepath.Join(dest, "anamnesis.log")
 	var log strings.Builder
 	logln := func(s string) { log.WriteString(s + "\n") }
 	logln(fmt.Sprintf("[%s] image=%s dest=%s plugins=%s", tool, img, dest, strings.Join(todo, ",")))
 
 	eng, err := memprocfs.Open(img, memprocfs.OpenOptions{
-		LibPath: os.Getenv("FLASHBACK_VMM_LIB"), SymbolsDir: symbolsDir,
+		LibPath: os.Getenv("ANAMNESIS_VMM_LIB"), SymbolsDir: symbolsDir,
 		SymbolsOnline: symbolsOnline, Forensic: true})
 	if err != nil {
 		logln("engine open failed: " + err.Error())

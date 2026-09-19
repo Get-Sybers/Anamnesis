@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"flashback/internal/car"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/value"
 )
 
 // The profile owner from a user-hive FILE path. Covers real renderings:

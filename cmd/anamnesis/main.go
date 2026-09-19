@@ -1,13 +1,13 @@
-// Command flashback turns a memory image into a MITRE CAR event store and timeline
+// Command anamnesis turns a memory image into a MITRE CAR event store and timeline
 // using a native (MemProcFS) engine — no Volatility, no Python.
 //
-//	flashback -f memory.raw -o out/                  # CAR store + wide JSONL timeline
-//	flashback -f memory.raw -o out/ --format csv     # CAR store + one CSV per CAR object
-//	flashback -f memory.raw -o out/ --no-timeline    # raw per-plugin JSONL + car.db only
-//	flashback --list-plugins                         # the default collector set, as JSON
+//	anamnesis -f memory.raw -o out/                  # CAR store + wide JSONL timeline
+//	anamnesis -f memory.raw -o out/ --format csv     # CAR store + one CSV per CAR object
+//	anamnesis -f memory.raw -o out/ --no-timeline    # raw per-plugin JSONL + car.db only
+//	anamnesis --list-plugins                         # the default collector set, as JSON
 //
 // With NO arguments it runs the env-driven batch orchestrator (the container
-// ENTRYPOINT): it discovers every image under FLASHBACK_MEMORY_DIR and processes
+// ENTRYPOINT): it discovers every image under ANAMNESIS_MEMORY_DIR and processes
 // each. Pipeline (Plaso-shaped): extract -> normalize -> store -> output.
 package main
 
@@ -19,13 +19,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"flashback/internal/collect"
-	"flashback/internal/memprocfs"
-	"flashback/internal/pipeline"
-	"flashback/internal/timeline"
+	"anamnesis/internal/collect"
+	"anamnesis/internal/memprocfs"
+	"anamnesis/internal/pipeline"
+	"anamnesis/internal/timeline"
 )
 
-// version is flashback's own line (a major bump from PIIAT-Mem 1.0.0: the engine
+// version is anamnesis's own line (a major bump from PIIAT-Mem 1.0.0: the engine
 // is now native Go/MemProcFS rather than Volatility 3).
 const version = "2.0.0"
 
@@ -41,7 +41,7 @@ func run(argv []string) int {
 }
 
 func runSingle(argv []string) int {
-	fs := flag.NewFlagSet("flashback", flag.ContinueOnError)
+	fs := flag.NewFlagSet("anamnesis", flag.ContinueOnError)
 	var memory, out, format, plugins, symbols, lib string
 	var noTimeline, symbolsOnline, listPlugins, showVersion bool
 	// -f/--memory and -o/--out both bind the same var (short + long).
@@ -52,7 +52,7 @@ func runSingle(argv []string) int {
 	fs.StringVar(&format, "format", "json", "output: json (wide CAR timeline) | csv (one CSV per CAR object)")
 	fs.StringVar(&plugins, "plugins", "", "comma-separated collector override (else the default set)")
 	fs.StringVar(&symbols, "symbols", "", "PDB/symbol cache dir (default: a temp dir)")
-	fs.StringVar(&lib, "lib", "", "path to the MemProcFS vmm library (else FLASHBACK_VMM_LIB / baked default)")
+	fs.StringVar(&lib, "lib", "", "path to the MemProcFS vmm library (else ANAMNESIS_VMM_LIB / baked default)")
 	fs.BoolVar(&noTimeline, "no-timeline", false, "skip rendered outputs; still write plugins/*.jsonl and car.db")
 	fs.BoolVar(&symbolsOnline, "symbols-online", false, "allow the engine to fetch PDB symbols (network)")
 	fs.BoolVar(&listPlugins, "list-plugins", false, "print the default collector set as JSON and exit")
@@ -62,7 +62,7 @@ func runSingle(argv []string) int {
 	}
 
 	if showVersion {
-		fmt.Printf("flashback %s\n", version)
+		fmt.Printf("anamnesis %s\n", version)
 		return 0
 	}
 	if listPlugins {
@@ -80,7 +80,7 @@ func runSingle(argv []string) int {
 	}
 	os.MkdirAll(out, 0o755)
 	if symbols == "" {
-		symbols, _ = os.MkdirTemp("", "flashback-symbols-")
+		symbols, _ = os.MkdirTemp("", "anamnesis-symbols-")
 	}
 	os.MkdirAll(symbols, 0o755)
 
@@ -89,7 +89,7 @@ func runSingle(argv []string) int {
 		names = splitComma(plugins)
 	}
 
-	fmt.Fprintf(os.Stderr, "flashback %s: %s -> %s (%s)\n", version, memory, out, format)
+	fmt.Fprintf(os.Stderr, "anamnesis %s: %s -> %s (%s)\n", version, memory, out, format)
 	eng, err := memprocfs.Open(memory, memprocfs.OpenOptions{
 		LibPath: libPath(lib), SymbolsDir: symbols, SymbolsOnline: symbolsOnline, Forensic: true})
 	if err != nil {
@@ -179,11 +179,11 @@ func isFile(p string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// libPath resolves the vmm library path: the --lib flag, else FLASHBACK_VMM_LIB,
+// libPath resolves the vmm library path: the --lib flag, else ANAMNESIS_VMM_LIB,
 // else empty (the implementation's baked default).
 func libPath(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
 	}
-	return os.Getenv("FLASHBACK_VMM_LIB")
+	return os.Getenv("ANAMNESIS_VMM_LIB")
 }

@@ -1,6 +1,6 @@
-# flashback — memory image to a MITRE CAR timeline (native, no Volatility)
+# anamnesis — memory image to a MITRE CAR timeline (native, no Volatility)
 
-Point it at a memory image; get a **MITRE CAR** event store and timeline. flashback
+Point it at a memory image; get a **MITRE CAR** event store and timeline. anamnesis
 is a **pure-Go** memory-forensics tool built on
 [MemProcFS](https://github.com/ufrisk/MemProcFS) — **no Volatility, no Python**. The
 pipeline is Plaso-shaped — **extract → normalize → store → output** — and the
@@ -8,15 +8,15 @@ deliverable is finished [MITRE CAR](https://car.mitre.org/data_model/): every
 extractable record becomes a CAR **object** doing an **action** at a **timestamp**,
 carrying that object's canonical **properties**.
 
-flashback is the successor to PIIAT-Mem: same CAR output contract (`car.db`,
+anamnesis is the successor to PIIAT-Mem: same CAR output contract (`car.db`,
 `timeline.json`, per-object CSVs), a native engine in place of the Volatility 3
 Python engine. See [docs/design/native-engine.md](docs/design/native-engine.md).
 
 ```
-flashback -f memory.raw -o out/                 # CAR store + wide JSONL timeline
-flashback -f memory.raw -o out/ --format csv    # CAR store + one CSV per CAR object
-flashback -f memory.raw -o out/ --no-timeline   # raw per-plugin JSONL + car.db only
-flashback --list-plugins                        # the default collector set, as JSON
+anamnesis -f memory.raw -o out/                 # CAR store + wide JSONL timeline
+anamnesis -f memory.raw -o out/ --format csv    # CAR store + one CSV per CAR object
+anamnesis -f memory.raw -o out/ --no-timeline   # raw per-plugin JSONL + car.db only
+anamnesis --list-plugins                        # the default collector set, as JSON
 ```
 
 Output:
@@ -62,7 +62,7 @@ idempotency contract). The native source is MemProcFS; the record shape is uncha
 
 ## Build
 
-flashback is a single static binary (`CGO_ENABLED=0`). The native memory engine is
+anamnesis is a single static binary (`CGO_ENABLED=0`). The native memory engine is
 compiled in with the `memprocfs` build tag and calls the MemProcFS `vmm` shared
 library at runtime (via purego — no cgo):
 
@@ -73,28 +73,28 @@ make test             # unit tests (the full CAR pipeline, no memory image neede
 ```
 
 The `memprocfs` build needs the MemProcFS `vmm.so` (+ `leechcore.so`) at runtime;
-point at it with `--lib` or `FLASHBACK_VMM_LIB` (default `/opt/flashback/lib/vmm.so`).
-The hardened `get-sybers/flashback` image (built by
+point at it with `--lib` or `ANAMNESIS_VMM_LIB` (default `/opt/anamnesis/lib/vmm.so`).
+The hardened `get-sybers/anamnesis` image (built by
 [GoDFIR-toolz](https://github.com/Get-Sybers/GoDFIR-toolz)) bundles the binary and the
 libraries.
 
 ## In a pipeline
 
-flashback stays a standalone tool inside a larger pipeline. In **DX_DFIR** it runs as
-the hardened, env-driven `get-sybers/flashback` container: with no arguments it
-discovers every image under `FLASHBACK_MEMORY_DIR` and writes
+anamnesis stays a standalone tool inside a larger pipeline. In **DX_DFIR** it runs as
+the hardened, env-driven `get-sybers/anamnesis` container: with no arguments it
+discovers every image under `ANAMNESIS_MEMORY_DIR` and writes
 `<out>/<image>/plugins/<plugin>.jsonl` + `car.db`, printing one JSON summary line —
 a drop-in for the old `get-sybers/piiat-mem` invocation.
 
 ```
 docker run --rm --network none --read-only --tmpfs /tmp \
-  -e FLASHBACK_PLUGINS= -e FLASHBACK_FORCE=0 -e FLASHBACK_SYMBOLS_ONLINE=0 \
+  -e ANAMNESIS_PLUGINS= -e ANAMNESIS_FORCE=0 -e ANAMNESIS_SYMBOLS_ONLINE=0 \
   -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
-  get-sybers/flashback:latest
+  get-sybers/anamnesis:latest
 ```
 
 Any CLI argument switches to single-image pass-through
-(`... get-sybers/flashback -f /mem/<image> -o /out`).
+(`... get-sybers/anamnesis -f /mem/<image> -o /out`).
 
 ## License
 

@@ -1,4 +1,4 @@
-module flashback
+module anamnesis
 
 go 1.25.2
 

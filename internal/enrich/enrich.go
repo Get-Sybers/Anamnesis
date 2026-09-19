@@ -21,9 +21,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"flashback/internal/car"
-	"flashback/internal/carmodel"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/carmodel"
+	"anamnesis/internal/value"
 )
 
 var (

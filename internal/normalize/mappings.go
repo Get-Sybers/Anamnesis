@@ -5,8 +5,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"flashback/internal/car"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/value"
 )
 
 // The static delegation table lives in mappings.yaml (embedded), NOT in Go — Go

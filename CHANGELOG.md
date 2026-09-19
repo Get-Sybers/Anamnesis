@@ -6,7 +6,7 @@ All notable changes are documented here, following
 
 ## [2.0.0] - 2026-09-19
 
-**Renamed to flashback, and the Volatility 3 (Python) engine is gone.** flashback
+**Renamed to anamnesis, and the Volatility 3 (Python) engine is gone.** anamnesis
 is a pure-Go memory-forensics tool built on
 [MemProcFS](https://github.com/ufrisk/MemProcFS) — no Volatility, no Python. The
 **CAR output contract is preserved**: the same `car.db` (13-object SQLite store),
@@ -28,7 +28,7 @@ identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consum
   record fields, so the CAR maps and the downstream contract are unchanged. Every
   spoke still carries the owning `_EPROCESS` offset for definitive links; a Process
   handle's object IS the target `_EPROCESS`, so access-target links are definitive.
-- **CLI + env-driven batch** (`FLASHBACK_*`) reproduce the old single-image CLI and
+- **CLI + env-driven batch** (`ANAMNESIS_*`) reproduce the old single-image CLI and
   the self-orchestrating container contract (one JSON summary line, exit 0/1/2).
 - **Removed.** The `piiat_mem` Python package, the `windows.piiat.*` Volatility
   plugins, the `jsonl_dfir` renderer, and the `docker/` Volatility image — the

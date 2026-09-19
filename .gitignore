@@ -1,5 +1,5 @@
 # build output
-/flashback
+/anamnesis
 *.exe
 
 # analysis output
@@ -8,7 +8,7 @@ out/
 timeline.json
 
 # symbol / PDB caches
-flashback-symbols-*/
+anamnesis-symbols-*/
 
 # go
 /vendor/

@@ -18,10 +18,10 @@ import (
 	"path/filepath"
 	"sort"
 
-	"flashback/internal/car"
-	"flashback/internal/carmodel"
-	"flashback/internal/store"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/carmodel"
+	"anamnesis/internal/store"
+	"anamnesis/internal/value"
 )
 
 var meta = []string{"timestamp", "car_object", "car_action", "guid", "owning_guid",

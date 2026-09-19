@@ -3,7 +3,7 @@
 // with a common event header plus that object's canonical properties as nullable
 // columns. Faithful port of piiat_mem/store.py.
 //
-// SQLite is modernc.org/sqlite — a pure-Go, cgo-free driver — so flashback builds
+// SQLite is modernc.org/sqlite — a pure-Go, cgo-free driver — so anamnesis builds
 // with CGO_ENABLED=0.
 package store
 
@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"flashback/internal/car"
-	"flashback/internal/carmodel"
+	"anamnesis/internal/car"
+	"anamnesis/internal/carmodel"
 
 	_ "modernc.org/sqlite"
 )

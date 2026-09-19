@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"flashback/internal/car"
-	"flashback/internal/carmodel"
-	"flashback/internal/enrich"
-	"flashback/internal/normalize"
-	"flashback/internal/store"
-	"flashback/internal/timeline"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/carmodel"
+	"anamnesis/internal/enrich"
+	"anamnesis/internal/normalize"
+	"anamnesis/internal/store"
+	"anamnesis/internal/timeline"
+	"anamnesis/internal/value"
 )
 
 func tag(ev car.Event) car.Event { ev["source_image"] = "img.mem"; return ev }

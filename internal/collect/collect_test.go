@@ -3,9 +3,9 @@ package collect
 import (
 	"testing"
 
-	"flashback/internal/memprocfs"
-	"flashback/internal/pipeline"
-	"flashback/internal/value"
+	"anamnesis/internal/memprocfs"
+	"anamnesis/internal/pipeline"
+	"anamnesis/internal/value"
 )
 
 // fakeEngine is a canned Engine: it lets the collectors' record-shaping be tested

@@ -6,8 +6,8 @@ key each object needs to **inherit** properties from a related entry. Source of
 truth for objects / actions / properties: `internal/carmodel/car_data_model.json`
 (vendored; regenerated from MITRE's own mitre-attack/car repo — see §7).
 
-Scope: the **flashback processor** only. CAR-at-query-time still applies to the
-artefacts we don't own; flashback is ours, so it emits finished CAR.
+Scope: the **anamnesis processor** only. CAR-at-query-time still applies to the
+artefacts we don't own; anamnesis is ours, so it emits finished CAR.
 
 ## 1. The objects — identity, action, timestamp (from memory)
 
@@ -81,7 +81,7 @@ memory-native unique identity is the **`_EPROCESS` offset** — every process ob
 has a unique address in the image, and the kernel itself links threads, modules
 and handles to a process **by pointer to that object**, not by PID. So:
 
-> flashback **synthesizes CAR `guid` = the `_EPROCESS` offset** (the process's
+> anamnesis **synthesizes CAR `guid` = the `_EPROCESS` offset** (the process's
 > kernel-object identity). That becomes the definitive join key; `pid` is demoted
 > to a plain attribute.
 

@@ -12,11 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	"flashback/internal/car"
-	"flashback/internal/enrich"
-	"flashback/internal/normalize"
-	"flashback/internal/store"
-	"flashback/internal/timeline"
+	"anamnesis/internal/car"
+	"anamnesis/internal/enrich"
+	"anamnesis/internal/normalize"
+	"anamnesis/internal/store"
+	"anamnesis/internal/timeline"
 )
 
 const jsonlExt = ".jsonl"

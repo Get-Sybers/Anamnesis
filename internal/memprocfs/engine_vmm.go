@@ -20,7 +20,7 @@ import (
 	mp "github.com/sergeyzav/gomemprocfs"
 )
 
-const defaultLib = "/opt/flashback/lib/vmm.so"
+const defaultLib = "/opt/anamnesis/lib/vmm.so"
 
 type vmmEngine struct {
 	vmm       *mp.Vmm

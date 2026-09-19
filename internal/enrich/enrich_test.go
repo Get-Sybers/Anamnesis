@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"flashback/internal/car"
-	"flashback/internal/carmodel"
-	"flashback/internal/normalize"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/carmodel"
+	"anamnesis/internal/normalize"
+	"anamnesis/internal/value"
 )
 
 // ---- helpers (mirror tests/test_car_pipeline.py) ---------------------------

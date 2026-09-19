@@ -3,8 +3,8 @@ package normalize
 import (
 	"testing"
 
-	"flashback/internal/car"
-	"flashback/internal/value"
+	"anamnesis/internal/car"
+	"anamnesis/internal/value"
 )
 
 // procRec mirrors tests/test_car_pipeline.py::_proc's raw record.

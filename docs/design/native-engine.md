@@ -1,7 +1,7 @@
-# flashback — native (Go / MemProcFS) engine
+# anamnesis — native (Go / MemProcFS) engine
 
 Tracks the rewrite that removes Volatility 3 (and its Python engine) from the
-memory-forensics lane. This is the design of record for **flashback**, the pure-Go
+memory-forensics lane. This is the design of record for **anamnesis**, the pure-Go
 successor to PIIAT-Mem. It supersedes the Volatility runner (`piiat_mem/runner.py`,
 `piiat_mem/container.py`), the custom Volatility plugins (`plugins/windows/piiat/*`)
 and the `jsonl_dfir` renderer — none of which survive the rename. It **keeps** the
@@ -16,14 +16,14 @@ Even fused into a hardened container (`get-sybers/piiat-mem`), that means a Pyth
 runtime, `pip install volatility3`, the ISF symbol dance, and the general weight and
 speed of the Python engine. The DX_DFIR / GoDFIR-toolz ecosystem has already replaced
 its other Python DFIR tools with static Go binaries (goevtx, gomft, gore, goese,
-goprefetch, …). flashback brings the memory lane in line: a Go tool that parses the
+goprefetch, …). anamnesis brings the memory lane in line: a Go tool that parses the
 image with a **native, non-Python engine** and emits the same finished MITRE CAR.
 
 ## 1. Engine: MemProcFS via purego
 
 The memory parsing is done by [MemProcFS](https://github.com/ufrisk/MemProcFS) (Ulf
 Frisk) — a mature, fast, C-based physical-memory analysis engine with no Python
-anywhere. flashback calls its `vmm` shared library (`vmm.so` + `leechcore.so`)
+anywhere. anamnesis calls its `vmm` shared library (`vmm.so` + `leechcore.so`)
 through **purego**, so the Go binary itself stays `CGO_ENABLED=0`: the native library
 is `dlopen`'d at runtime, not linked at build time. The image opens the dump with the
 LeechCore `file://` device; no kernel driver, no live target.
@@ -45,9 +45,9 @@ LeechCore `file://` device; no kernel driver, no live target.
 
 MemProcFS resolves kernel/type offsets from its bundled `info.db` and, for full
 fidelity, PDBs from the Microsoft Symbol Server on first use (the analogue of
-Volatility's ISF fetch). flashback keeps the same offline-first posture as PIIAT-Mem:
+Volatility's ISF fetch). anamnesis keeps the same offline-first posture as PIIAT-Mem:
 default `--network none`, pre-seed a symbol/PDB cache; `--symbols-online`
-(`FLASHBACK_SYMBOLS_ONLINE`) is the knob that documents a run given network for the
+(`ANAMNESIS_SYMBOLS_ONLINE`) is the knob that documents a run given network for the
 fetch. Much of the process/handle/module/network surface resolves from `info.db`
 alone (offline); PDBs mainly sharpen symbol-name resolution (e.g. thread start
 function).
@@ -55,7 +55,7 @@ function).
 ## 2. Architecture
 
 ```
-cmd/flashback            CLI (single-image) + env-driven batch orchestrator
+cmd/anamnesis            CLI (single-image) + env-driven batch orchestrator
 internal/
   memprocfs/             Engine interface + purego/vmmdll implementation (the ONLY native seam)
   collect/               collectors: Engine -> raw records (one map per artefact) + JSONL
@@ -117,7 +117,7 @@ The value of PIIAT-Mem is that a spoke (thread/module/handle) links to its ownin
 process by the kernel's own pointer — the `_EPROCESS` object address — not by the
 reused PID (`docs/design/car-store.md` §3). MemProcFS exposes each process's
 `EPROCESS` virtual address (`GetProcessInfoAll`), and its per-process module/thread/
-handle enumerations are produced *from* that `EPROCESS`, so flashback emits
+handle enumerations are produced *from* that `EPROCESS`, so anamnesis emits
 `OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the Volatility
 `windows.piiat.*` plugins did. `enrich` is unchanged: join on `OwnerOffset` →
 `link_confidence="definitive"`, else the `(pid, create-time window)` join →
@@ -135,7 +135,7 @@ Downstream consumers were audited:
 - **DX_DFIR** volatility lane: `docker run`s the image, reads the per-image output
   tree; the CAR lane feeds byakugan the `car.db`.
 
-flashback therefore reproduces, per image:
+anamnesis therefore reproduces, per image:
 
 - `car.db` — SQLite, **one table per CAR object** (13, from `car_data_model.json`) +
   `image_context`, the exact header + property columns of `store.py`, indexes on
@@ -145,8 +145,8 @@ flashback therefore reproduces, per image:
 - `car/<object>.csv` — per-object CSV (`--format csv`).
 - `plugins/<name>.jsonl` — raw per-collector records, for traceability. The names
   stay the Volatility plugin ids (`windows.piiat.processes`, …) because the batch
-  idempotency and PIIAT plugin-set selection (`--plugins`, `PIIAT/FLASHBACK_PLUGINS`)
-  key on them; the *columns* are flashback's own but mirror the old ones.
+  idempotency and PIIAT plugin-set selection (`--plugins`, `PIIAT/ANAMNESIS_PLUGINS`)
+  key on them; the *columns* are anamnesis's own but mirror the old ones.
 
 The env-driven batch contract (self-orchestrating container) is reproduced with the
 renamed env vars (§6): discover images, per-plugin idempotency, one JSON summary line,
@@ -164,18 +164,18 @@ exit codes 0/1/2 — identical semantics to `piiat_mem_batch.py`.
   M57, lonewolf) once the image + libs are present. This is called out at every
   collector as the remaining gate.
 
-## 6. Rename: PIIAT-Mem → flashback
+## 6. Rename: PIIAT-Mem → anamnesis
 
 The user's directive is a full rename ("everything"). Layers:
 
-1. **Tool / CLI / package / module** → `flashback` (this repo). Binary `flashback`;
-   Go module `flashback`.
-2. **Docker image** `get-sybers/piiat-mem` → `get-sybers/flashback`;
-   **env contract** `PIIAT_*` → `FLASHBACK_*` (GoDFIR-toolz Dockerfile + build-all.sh,
+1. **Tool / CLI / package / module** → `anamnesis` (this repo). Binary `anamnesis`;
+   Go module `anamnesis`.
+2. **Docker image** `get-sybers/piiat-mem` → `get-sybers/anamnesis`;
+   **env contract** `PIIAT_*` → `ANAMNESIS_*` (GoDFIR-toolz Dockerfile + build-all.sh,
    DX_DFIR ansible volatility lane, `images.yml`, Go health check).
-3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/flashback` — done by the owner
+3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/Anamnesis` — done by the owner
    in GitHub settings, and it must happen **before the images are built**: the
-   GoDFIR-toolz Dockerfile clones `Get-Sybers/flashback` at the `sources.yml` pin, so
+   GoDFIR-toolz Dockerfile clones `Get-Sybers/Anamnesis` at the `sources.yml` pin, so
    the rename is a build prerequisite (GitHub redirects the old URL, but the rename
    should land first). Every cross-repo reference (`sources.yml` key + URL, byakugan
    `sources/memory.yaml` url, doc links) already points at the new name.
@@ -184,20 +184,20 @@ The user's directive is a full rename ("everything"). Layers:
 
 ## 7. Container (GoDFIR-toolz)
 
-`docker/GoDFIR-toolz/flashback/Dockerfile` replaces the Python image: a Go build stage
-(`CGO_ENABLED=0 go build` of the pinned flashback source) and a minimal hardened glibc
-runtime carrying the `flashback` binary + MemProcFS `.so` files (fetched + checksum-
+`docker/GoDFIR-toolz/anamnesis/Dockerfile` replaces the Python image: a Go build stage
+(`CGO_ENABLED=0 go build` of the pinned anamnesis source) and a minimal hardened glibc
+runtime carrying the `anamnesis` binary + MemProcFS `.so` files (fetched + checksum-
 pinned from the MemProcFS release), the shared hardener (uid renamed/locked, no shell,
 no package manager), and the same batch ENTRYPOINT semantics. No Python, no Volatility,
 no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out …` with
-`FLASHBACK_*` env — a drop-in for the current `get-sybers/piiat-mem` invocation.
+`ANAMNESIS_*` env — a drop-in for the current `get-sybers/piiat-mem` invocation.
 
 ## 8. Phasing / status
 
 1. Design doc (this file). ✅
 2. CAR pipeline in Go (carmodel/normalize/enrich/store/timeline) + the ported golden
    tests — the tested core, no target needed. ✅
-3. CLI + env-driven batch orchestrator (FLASHBACK_* contract). ✅
+3. CLI + env-driven batch orchestrator (ANAMNESIS_* contract). ✅
 4. `internal/memprocfs` binding (`-tags memprocfs`) + collector framework + collectors
    — compiles against gomemprocfs; runtime needs on-target validation. ✅ (build)
 5. Volatility engine removed (Python package, plugins, renderer, old Dockerfile). ✅

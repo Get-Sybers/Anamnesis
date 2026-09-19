@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"flashback/internal/car"
-	"flashback/internal/memprocfs"
+	"anamnesis/internal/car"
+	"anamnesis/internal/memprocfs"
 )
 
 // collectProcesses -> windows.piiat.processes. One row per process, keyed by the

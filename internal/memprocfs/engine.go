@@ -1,5 +1,5 @@
 // Package memprocfs is the ONLY native seam: the Engine interface abstracts the
-// MemProcFS vmm library behind flashback's own domain structs, so the collectors
+// MemProcFS vmm library behind anamnesis's own domain structs, so the collectors
 // never see purego and the binding is swappable. A memory image is opened once;
 // each method answers one enumeration the collectors reshape into CAR records.
 //
@@ -156,7 +156,7 @@ type MalRegion struct {
 	Hexdump       string
 }
 
-// Engine is the native memory-analysis surface flashback needs. One image, opened
+// Engine is the native memory-analysis surface anamnesis needs. One image, opened
 // once; every method is an enumeration. An implementation wraps MemProcFS.
 type Engine interface {
 	Processes() ([]Process, error)
@@ -185,7 +185,7 @@ func ProcGUID(eprocess uint64) string {
 // OpenOptions configures how the native engine opens a memory image.
 type OpenOptions struct {
 	// LibPath is the MemProcFS vmm shared library (vmm.so). Empty uses the
-	// implementation default (env FLASHBACK_VMM_LIB, else a baked-in path).
+	// implementation default (env ANAMNESIS_VMM_LIB, else a baked-in path).
 	LibPath string
 	// SymbolsDir is the PDB/symbol cache directory.
 	SymbolsDir string
