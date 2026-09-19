@@ -12,11 +12,14 @@
 package enrich
 
 import (
+	_ "embed"
 	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"flashback/internal/car"
 	"flashback/internal/carmodel"
@@ -46,17 +49,28 @@ func cloneEvent(ev car.Event) car.Event {
 	return out
 }
 
-// One canonical name per well-known account, applied store-wide.
-var wellKnownSIDs = map[string]string{
-	"S-1-5-18": "Local System",
-	"S-1-5-19": "Local Service",
-	"S-1-5-20": "Network Service",
-}
+// The well-known-account names and the inheritable property list are static data,
+// loaded from data.yaml (embedded) rather than hardcoded here.
+//
+//go:embed data.yaml
+var dataYAML []byte
 
-// Process-context properties a spoke may inherit (filtered per object, filled only
-// where null).
-var inheritFields = []string{"exe", "image_path", "command_line", "user", "sid", "uid",
-	"fqdn", "hostname", "ppid"}
+var (
+	wellKnownSIDs map[string]string
+	inheritFields []string
+)
+
+func init() {
+	var d struct {
+		WellKnownSIDs map[string]string `yaml:"well_known_sids"`
+		InheritFields []string          `yaml:"inherit_fields"`
+	}
+	if err := yaml.Unmarshal(dataYAML, &d); err != nil {
+		panic("enrich: parsing data.yaml: " + err.Error())
+	}
+	wellKnownSIDs = d.WellKnownSIDs
+	inheritFields = d.InheritFields
+}
 
 // --- small helpers -----------------------------------------------------------
 

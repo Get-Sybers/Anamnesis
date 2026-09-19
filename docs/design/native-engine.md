@@ -66,6 +66,17 @@ internal/
   timeline/              timeline.json (wide) + car/<object>.csv + malfind overlay (port of timeline.py)
 ```
 
+**Static delegations live in YAML, not Go.** The mapping/config data is embedded
+via `go:embed` and interpreted at load — Go carries only logic (marker resolvers,
+predicates, collector functions), never the tables:
+
+- `internal/normalize/mappings.yaml` — the per-plugin → CAR delegation table
+  (object/action/timestamp/guid/props/keep, variant predicates) + `supersedes`.
+- `internal/enrich/data.yaml` — the well-known-SID names + the inheritable-property list.
+- `internal/collect/collectors.yaml` — the default collector set (run order) + the
+  curated registry targets.
+- `internal/carmodel/car_data_model.json` — the vendored MITRE model (upstream JSON).
+
 Data flow (Plaso-shaped, unchanged from PIIAT-Mem): **extract → normalize → store →
 output**. Collectors are the Volatility-plugin analogues; each emits raw records under
 the **same field/column names** the old per-plugin JSONL used, so the normalize maps
@@ -163,9 +174,11 @@ The user's directive is a full rename ("everything"). Layers:
    **env contract** `PIIAT_*` → `FLASHBACK_*` (GoDFIR-toolz Dockerfile + build-all.sh,
    DX_DFIR ansible volatility lane, `images.yml`, Go health check).
 3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/flashback` — done by the owner
-   in GitHub settings (GitHub redirects old URLs); flashback then updates every
-   cross-repo reference (`sources.yml` key + URL, byakugan `sources/memory.yaml` url,
-   submodule URLs, doc links).
+   in GitHub settings, and it must happen **before the images are built**: the
+   GoDFIR-toolz Dockerfile clones `Get-Sybers/flashback` at the `sources.yml` pin, so
+   the rename is a build prerequisite (GitHub redirects the old URL, but the rename
+   should land first). Every cross-repo reference (`sources.yml` key + URL, byakugan
+   `sources/memory.yaml` url, doc links) already points at the new name.
 4. **Docs / branding** across all four repos: READMEs, `docs/`, CHANGELOGs, and the
    "Put It In A Timeline (Memory)" backronym.
 
@@ -182,12 +195,15 @@ no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out 
 ## 8. Phasing / status
 
 1. Design doc (this file). ✅
-2. Go module + carmodel + CAR pipeline (normalize/enrich/store/timeline) + ported
-   golden tests. — the tested core, no target needed.
-3. CLI + env-driven batch orchestrator (FLASHBACK_* contract).
-4. `internal/memprocfs` binding + collector framework + collectors.
-5. Remove the Volatility engine (Python package, plugins, renderer, old Dockerfile).
-6. GoDFIR-toolz image + DX_DFIR wiring + ecosystem rename sweep.
-7. On-target validation on the standard corpora; field-parity sign-off.
-</content>
-</invoke>
+2. CAR pipeline in Go (carmodel/normalize/enrich/store/timeline) + the ported golden
+   tests — the tested core, no target needed. ✅
+3. CLI + env-driven batch orchestrator (FLASHBACK_* contract). ✅
+4. `internal/memprocfs` binding (`-tags memprocfs`) + collector framework + collectors
+   — compiles against gomemprocfs; runtime needs on-target validation. ✅ (build)
+5. Volatility engine removed (Python package, plugins, renderer, old Dockerfile). ✅
+6. Static delegation tables moved to embedded YAML (§2). ✅
+7. GoDFIR-toolz image + DX_DFIR wiring + ecosystem rename sweep. ✅
+8. **Prerequisite before building images:** the GitHub repo rename (§6.3).
+9. Remaining: on-target validation on the standard corpora (field parity + the
+   `TODO(on-target)` engine items); pin `MEMPROCFS_SHA256`.
+

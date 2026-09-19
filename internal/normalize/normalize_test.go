@@ -59,9 +59,9 @@ func TestNormalizeEpochSentinelTimestampDropped(t *testing.T) {
 
 func TestNormalizeRegistryUserFromHiveAndAction(t *testing.T) {
 	ev := Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\??\C:\Users\jake\NTUSER.DAT`, "Key": `Software\Run`,
+		"Hive": `\??\C:\Users\alice\NTUSER.DAT`, "Key": `Software\Run`,
 		"ValueName": "x", "ValueData": "y", "ValueType": "REG_SZ", "LastWrite": "2020-01-02"})
-	if str(ev, "car_action") != "value_edit" || str(ev, "user") != "jake" {
+	if str(ev, "car_action") != "value_edit" || str(ev, "user") != "alice" {
 		t.Errorf("action=%v user=%v", ev["car_action"], ev["user"])
 	}
 }

@@ -6,41 +6,75 @@
 package collect
 
 import (
+	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 
 	"flashback/internal/car"
 	"flashback/internal/memprocfs"
 )
 
+type collectFn = func(memprocfs.Engine) ([]car.Record, error)
+
 // Collector is one named extraction (its Name is the Volatility plugin id kept
 // for the output/idempotency contract).
 type Collector struct {
 	Name    string
-	Collect func(memprocfs.Engine) ([]car.Record, error)
+	Collect collectFn
 }
 
-// Default is the CAR collector set, in run order (mirrors the batch DEFAULT_PLUGINS:
-// banners first — it validates the image without symbols).
-var Default = []Collector{
-	{"banners.Banners", collectBanners},
-	{"windows.info", collectInfo},
-	{"windows.piiat.processes", collectProcesses},
-	{"windows.pslist", collectPslist},
-	{"windows.piiat.modules", collectModules},
-	{"windows.modules", collectDrivers},
-	{"windows.piiat.network", collectNetwork},
-	{"windows.netstat", collectNetstat},
-	{"windows.piiat.sessions", collectSessions},
-	{"windows.filescan", collectFilescan},
-	{"windows.piiat.files", collectFiles},
-	{"windows.svcscan", collectServices},
-	{"windows.piiat.threads", collectThreads},
-	{"windows.piiat.registry", collectRegistry},
-	{"windows.piiat.access", collectAccess},
-	{"windows.mftscan.MFTScan", collectMFT},
-	{"windows.malfind", collectMalfind},
+// collectorFuncs binds each plugin name to its Go extraction function. The SET
+// and ORDER of the default run — and the registry targets — are static data in
+// collectors.yaml (below); only these bindings (the logic) stay in Go.
+var collectorFuncs = map[string]collectFn{
+	"banners.Banners":         collectBanners,
+	"windows.info":            collectInfo,
+	"windows.piiat.processes": collectProcesses,
+	"windows.pslist":          collectPslist,
+	"windows.piiat.modules":   collectModules,
+	"windows.modules":         collectDrivers,
+	"windows.piiat.network":   collectNetwork,
+	"windows.netstat":         collectNetstat,
+	"windows.piiat.sessions":  collectSessions,
+	"windows.filescan":        collectFilescan,
+	"windows.piiat.files":     collectFiles,
+	"windows.svcscan":         collectServices,
+	"windows.piiat.threads":   collectThreads,
+	"windows.piiat.registry":  collectRegistry,
+	"windows.piiat.access":    collectAccess,
+	"windows.mftscan.MFTScan": collectMFT,
+	"windows.malfind":         collectMalfind,
+}
+
+//go:embed collectors.yaml
+var collectorsYAML []byte
+
+// Default is the CAR collector set in run order; DefaultRegistryTargets is the
+// curated key list — both loaded from collectors.yaml at init.
+var (
+	Default                []Collector
+	DefaultRegistryTargets []string
+)
+
+func init() {
+	var cfg struct {
+		DefaultPlugins  []string `yaml:"default_plugins"`
+		RegistryTargets []string `yaml:"registry_targets"`
+	}
+	if err := yaml.Unmarshal(collectorsYAML, &cfg); err != nil {
+		panic("collect: parsing collectors.yaml: " + err.Error())
+	}
+	for _, name := range cfg.DefaultPlugins {
+		fn, ok := collectorFuncs[name]
+		if !ok {
+			panic("collect: collectors.yaml lists unknown collector " + name)
+		}
+		Default = append(Default, Collector{Name: name, Collect: fn})
+	}
+	DefaultRegistryTargets = cfg.RegistryTargets
 }
 
 // Names returns the default collector names (for --list-plugins).
@@ -129,19 +163,4 @@ func pidOrNil(pid uint32) any {
 		return nil
 	}
 	return int(pid)
-}
-
-// DefaultRegistryTargets is the curated high-value key set the registry collector
-// reads (host identity, autoruns, services, profiles). The Engine implementation
-// resolves these against the in-memory hives.
-var DefaultRegistryTargets = []string{
-	`Microsoft\Windows\CurrentVersion\Run`,
-	`Microsoft\Windows\CurrentVersion\RunOnce`,
-	`Microsoft\Windows\CurrentVersion\Explorer\Shell Folders`,
-	`Microsoft\Windows NT\CurrentVersion\Winlogon`,
-	`Microsoft\Windows NT\CurrentVersion\ProfileList`,
-	`System\CurrentControlSet\Control\ComputerName\ComputerName`,
-	`System\CurrentControlSet\Control\ComputerName\ActiveComputerName`,
-	`System\CurrentControlSet\Services\Tcpip\Parameters`,
-	`System\CurrentControlSet\Control\Session Manager\Environment`,
 }

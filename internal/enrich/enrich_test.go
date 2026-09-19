@@ -101,10 +101,10 @@ func TestParentLinkFillsOnlyNull(t *testing.T) {
 func TestSessionRowsCollapseAndFeedProcessUser(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
 	s1 := tag(normalize.Normalize("windows.sessions", car.Record{
-		"Session ID": 1, "User Name": `HOST\jake`, "Create Time": "2020-01-01T00:00:02+00:00",
+		"Session ID": 1, "User Name": `HOST\alice`, "Create Time": "2020-01-01T00:00:02+00:00",
 		"Process ID": 10, "Process": "x.exe"}))
 	s2 := tag(normalize.Normalize("windows.sessions", car.Record{
-		"Session ID": 1, "User Name": `HOST\jake`, "Create Time": "2020-01-01T00:00:09+00:00",
+		"Session ID": 1, "User Name": `HOST\alice`, "Create Time": "2020-01-01T00:00:09+00:00",
 		"Process ID": 11, "Process": "y.exe"}))
 	out := Enrich([]car.Event{p, s1, s2})
 	sessions := ofObj(out, "user_session")
@@ -114,7 +114,7 @@ func TestSessionRowsCollapseAndFeedProcessUser(t *testing.T) {
 	if s(sessions[0], "timestamp") != "2020-01-01T00:00:02+00:00" {
 		t.Errorf("session ts=%v (want earliest)", sessions[0]["timestamp"])
 	}
-	if s(ofObj(out, "process")[0], "user") != `HOST\jake` {
+	if s(ofObj(out, "process")[0], "user") != `HOST\alice` {
 		t.Errorf("process user=%v", ofObj(out, "process")[0]["user"])
 	}
 }
@@ -521,7 +521,7 @@ func TestLoginSuccessfulTrueByExistence(t *testing.T) {
 		t.Error("login_successful should be true by existence")
 	}
 	b := normalize.Normalize("windows.sessions", car.Record{
-		"Session ID": 1, "User Name": `HOST\jake`, "Create Time": "2020-01-01T00:00:02+00:00",
+		"Session ID": 1, "User Name": `HOST\alice`, "Create Time": "2020-01-01T00:00:02+00:00",
 		"Process ID": 10, "Process": "x.exe"})
 	if b["login_successful"] != true {
 		t.Error("built-in session login_successful should be true")
