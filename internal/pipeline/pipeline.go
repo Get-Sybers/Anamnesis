@@ -1,5 +1,5 @@
 // Package pipeline wires extract-output together: it (re)builds the CAR store from
-// the raw per-plugin JSONL on disk. Faithful port of piiat_mem/cli.build_store.
+// the raw per-plugin JSONL on disk. Faithful port of the original Python cli.build_store.
 //
 // Scanning the disk (not one invocation's plugin list) makes the store safe under
 // subset/incremental runs — earlier plugins' raw output is re-normalized, never

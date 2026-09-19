@@ -25,15 +25,15 @@ import (
 	"anamnesis/internal/timeline"
 )
 
-// version is anamnesis's own line (a major bump from PIIAT-Mem 1.0.0: the engine
-// is now native Go/MemProcFS rather than Volatility 3).
+// version is anamnesis's own line (a major bump from the 1.0.0 Python release: the
+// engine is now native Go/MemProcFS rather than Volatility 3).
 const version = "2.0.0"
 
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(argv []string) int {
 	// No args -> env-driven batch mode (the hardened container's ENTRYPOINT),
-	// mirroring the old piiat_mem_batch contract. Any args -> the single-image CLI.
+	// mirroring the old Python batch contract. Any args -> the single-image CLI.
 	if len(argv) == 0 {
 		return runBatch()
 	}

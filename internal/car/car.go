@@ -1,5 +1,5 @@
 // Package car holds the shared record/event types for the CAR pipeline. Both are
-// string-keyed maps — the faithful Go analogue of PIIAT-Mem's Python dicts — so the
+// string-keyed maps — the faithful Go analogue of the original Python dicts — so the
 // normalize/enrich/store/timeline logic ports across directly. A Record is one raw
 // collector row; an Event is one normalized CAR event.
 package car

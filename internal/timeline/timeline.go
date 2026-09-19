@@ -1,5 +1,5 @@
 // Package timeline is the output stage — it derives the deliverables from the
-// CAR-event store (the psort analogue). Faithful port of piiat_mem/timeline.py.
+// CAR-event store (the psort analogue). Faithful port of the original Python timeline.py.
 //
 //   - wide JSONL timeline (timeline.json): one line per TIMESTAMPED CAR event —
 //     the meta columns + every CAR property across every object (the model

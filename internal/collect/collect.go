@@ -1,7 +1,7 @@
 // Package collect is the extraction stage: collectors turn the native Engine's
 // enumerations into raw per-plugin records (the analogue of the Volatility
 // per-plugin JSONL), which the pipeline then normalizes into CAR. Each collector
-// keeps its PIIAT plugin NAME (the pipeline and idempotency key on it) and emits
+// keeps its plugin NAME (the pipeline and idempotency key on it) and emits
 // the field names normalize expects; only the native source changed.
 package collect
 

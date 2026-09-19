@@ -1,5 +1,5 @@
 // Package enrich resolves process-context links and inherits properties over the
-// normalized events of ONE run. Faithful port of piiat_mem/enrich.py.
+// normalized events of ONE run. Faithful port of the original Python enrich.py.
 //
 //   - process -> parent: candidates are processes whose pid == the child's ppid and
 //     whose create time is <= the child's; the latest wins (heuristic — PID reuse).
