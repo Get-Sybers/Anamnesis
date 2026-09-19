@@ -1,8 +1,8 @@
 # anamnesis — native (Go / MemProcFS) engine
 
-Tracks the rewrite that removes Volatility 3 (and its Python engine) from the
-memory-forensics lane. This is the design of record for **anamnesis**, the pure-Go
-rewrite of the memory-forensics lane. It supersedes the old Volatility runner and
+This is the design of record for **anamnesis**, the pure-Go rewrite that removed
+Volatility 3 (and its Python engine) from the memory-forensics lane. It supersedes
+the old Volatility runner and
 container, the custom Volatility plugins and the `jsonl_dfir` renderer — none of
 which survive the rewrite. It **keeps** the
 CAR data model and the normalize → enrich → store → output pipeline, re-implemented
@@ -11,7 +11,7 @@ on it (see §4).
 
 ## 0. Why
 
-The previous implementation drives Volatility 3 — which *is* Python, irreducibly — over
+The previous implementation drove Volatility 3 — which *is* Python, irreducibly — over
 a memory image. Even fused into a hardened container, that means a Python
 runtime, `pip install volatility3`, the ISF symbol dance, and the general weight and
 speed of the Python engine. The DX_DFIR / GoDFIR-toolz ecosystem has already replaced
@@ -78,7 +78,7 @@ predicates, collector functions), never the tables:
 - `internal/carmodel/car_data_model.json` — the vendored MITRE model (upstream JSON).
 
 Data flow (Plaso-shaped, unchanged): **extract → normalize → store →
-output**. Collectors are the Volatility-plugin analogues; each emits raw records under
+output**. Collectors are the extraction analogues; each emits raw records under
 the **same field/column names** the old per-plugin JSONL used, so the normalize maps
 (and the golden tests) port across verbatim. The raw per-collector JSONL is retained
 for traceability under `plugins/<name>.jsonl` (see §4 on why the name stays).
@@ -118,7 +118,7 @@ process by the kernel's own pointer — the `_EPROCESS` object address — not b
 reused PID (`docs/design/car-store.md` §3). MemProcFS exposes each process's
 `EPROCESS` virtual address (`GetProcessInfoAll`), and its per-process module/thread/
 handle enumerations are produced *from* that `EPROCESS`, so anamnesis emits
-`OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the Volatility
+`OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the
 `windows.piiat.*` plugins did. `enrich` is unchanged: join on `OwnerOffset` →
 `link_confidence="definitive"`, else the `(pid, create-time window)` join →
 `"heuristic"`. `process.guid = "proc-<hex EPROCESS VA>"` and `native.Offset =
@@ -144,7 +144,7 @@ anamnesis therefore reproduces, per image:
   events + the malfind overlay (standalone / non-`--no-timeline`).
 - `car/<object>.csv` — per-object CSV (`--format csv`).
 - `plugins/<name>.jsonl` — raw per-collector records, for traceability. The names
-  stay the Volatility plugin ids (`windows.piiat.processes`, …) because the batch
+  stay the same plugin ids (`windows.piiat.processes`, …) because the batch
   idempotency and plugin-set selection (`--plugins`, `ANAMNESIS_PLUGINS`)
   key on them; the *columns* are anamnesis's own but mirror the old ones.
 

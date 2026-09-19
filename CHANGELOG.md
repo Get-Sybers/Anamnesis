@@ -41,7 +41,7 @@ SID→name, and the forensic MFT/filescan/malfind collectors — all marked
 
 ## [1.0.0] - 2026-08-29
 
-First stable release. Anamnesis turns a memory image into a **MITRE CAR** event
+First stable release. PIIAT-Mem turns a memory image into a **MITRE CAR** event
 store and timeline — Plaso-shaped (extract → normalize → enrich → store →
 output) — consolidating the 0.2–0.4 development arc into a stable interface:
 
@@ -233,7 +233,7 @@ Detailed change history for the pre-1.0 milestones is retained below.
 ## [0.1.0] - 2026-08-28
 
 ### Added
-- Initial release. `anamnesis -f <image> -o <out>` runs Volatility 3 over a
+- Initial release. `piiat-mem -f <image> -o <out>` runs Volatility 3 over a
   memory image and writes a time-ordered timeline (`timeline.json` JSONL or
   `--format csv`) alongside the raw per-plugin JSONL.
 - Custom Volatility 3 plugins: `dfir_processes.DfirProcesses` (psscan-based

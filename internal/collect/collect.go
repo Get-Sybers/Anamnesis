@@ -1,5 +1,5 @@
 // Package collect is the extraction stage: collectors turn the native Engine's
-// enumerations into raw per-plugin records (the analogue of the Volatility
+// enumerations into raw per-plugin records (the analogue of the earlier
 // per-plugin JSONL), which the pipeline then normalizes into CAR. Each collector
 // keeps its plugin NAME (the pipeline and idempotency key on it) and emits
 // the field names normalize expects; only the native source changed.
@@ -19,7 +19,7 @@ import (
 
 type collectFn = func(memprocfs.Engine) ([]car.Record, error)
 
-// Collector is one named extraction (its Name is the Volatility plugin id kept
+// Collector is one named extraction (its Name is the plugin id kept
 // for the output/idempotency contract).
 type Collector struct {
 	Name    string
@@ -149,7 +149,7 @@ func writeJSONL(path string, recs []car.Record) error {
 
 // --- small record helpers ----------------------------------------------------
 
-// nilIfEmpty maps "" to nil (the analogue of Volatility's NotAvailableValue), so
+// nilIfEmpty maps "" to nil (an unavailable-value sentinel), so
 // an unresolved field is null rather than an empty string.
 func nilIfEmpty(s string) any {
 	if s == "" {

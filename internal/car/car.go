@@ -4,8 +4,8 @@
 // collector row; an Event is one normalized CAR event.
 package car
 
-// Record is one raw record as a collector emits it (mirrors a Volatility
-// per-plugin JSONL row: named columns → values).
+// Record is one raw record as a collector emits it (mirrors a per-plugin
+// JSONL row: named columns → values).
 type Record = map[string]any
 
 // Event is one normalized MITRE CAR event.

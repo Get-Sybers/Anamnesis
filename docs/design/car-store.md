@@ -1,6 +1,6 @@
 # CAR-event store — relational model (Phase 1)
 
-Tracks epic #1. This is the **relational design** the store is built on: the CAR
+This is the **relational design** the store is built on: the CAR
 objects, what makes each event unique, how the objects relate, and the identity
 key each object needs to **inherit** properties from a related entry. Source of
 truth for objects / actions / properties: `internal/carmodel/car_data_model.json`
