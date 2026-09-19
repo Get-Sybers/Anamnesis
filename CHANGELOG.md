@@ -4,6 +4,41 @@ All notable changes are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-19
+
+**Renamed to anamnesis, and the Volatility 3 (Python) engine is gone.** anamnesis
+is a pure-Go memory-forensics tool built on
+[MemProcFS](https://github.com/ufrisk/MemProcFS) — no Volatility, no Python. The
+**CAR output contract is preserved**: the same `car.db` (13-object SQLite store),
+`timeline.json`, and per-object CSVs, keyed on the same `_EPROCESS`-offset process
+identity (`guid = proc-<hex>`, the `memory_proc_offset` join key byakugan consumes
+1:1).
+
+- **Engine.** MemProcFS via [gomemprocfs](https://github.com/sergeyzav/gomemprocfs)
+  (purego, no cgo) — the `vmm` library is loaded at runtime, so the binary stays
+  `CGO_ENABLED=0`. Compiled in with the `memprocfs` build tag; the default build
+  carries a clear "no backend" stub so the pipeline builds and tests with no
+  native library.
+- **Pipeline ported to Go.** normalize → enrich → store → timeline, a faithful
+  port of the `piiat_mem` package, with SQLite via the cgo-free
+  `modernc.org/sqlite`. Every case from the old `tests/test_car_pipeline.py` is a
+  Go table test and passes (definitive/heuristic linking, host identity, session
+  collapse, MFT merge, ProfileList SID resolution, dedupe, malfind overlay).
+- **Collectors** replace the Volatility plugins, keeping the same plugin names and
+  record fields, so the CAR maps and the downstream contract are unchanged. Every
+  spoke still carries the owning `_EPROCESS` offset for definitive links; a Process
+  handle's object IS the target `_EPROCESS`, so access-target links are definitive.
+- **CLI + env-driven batch** (`ANAMNESIS_*`) reproduce the old single-image CLI and
+  the self-orchestrating container contract (one JSON summary line, exit 0/1/2).
+- **Removed.** The `piiat_mem` Python package, the `windows.piiat.*` Volatility
+  plugins, the `jsonl_dfir` renderer, and the `docker/` Volatility image — the
+  hardened image is now built by GoDFIR-toolz around the Go binary + MemProcFS libs.
+
+On-target validation (a real image + the vmm library) is pending for a few engine
+mappings: process create time, the Hidden flag, thread start-module resolution,
+SID→name, and the forensic MFT/filescan/malfind collectors — all marked
+`TODO(on-target)` in `internal/memprocfs`.
+
 ## [1.0.0] - 2026-08-29
 
 First stable release. PIIAT-Mem turns a memory image into a **MITRE CAR** event

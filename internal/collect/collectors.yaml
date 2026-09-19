@@ -1,0 +1,36 @@
+# The default CAR collector set, in run order (banners first — it validates the
+# image without symbols). Each name binds to a Go collector function
+# (collectorFuncs in collect.go): the ORDER and SET are data and live here; the
+# extraction logic stays in Go.
+default_plugins:
+  - banners.Banners
+  - windows.info
+  - windows.piiat.processes
+  - windows.pslist
+  - windows.piiat.modules
+  - windows.modules
+  - windows.piiat.network
+  - windows.netstat
+  - windows.piiat.sessions
+  - windows.filescan
+  - windows.piiat.files
+  - windows.svcscan
+  - windows.piiat.threads
+  - windows.piiat.registry
+  - windows.piiat.access
+  - windows.mftscan.MFTScan
+  - windows.malfind
+
+# The curated high-value registry keys the registry collector reads (host
+# identity, autoruns, services, profiles). The Engine resolves these against the
+# in-memory hives.
+registry_targets:
+  - Microsoft\Windows\CurrentVersion\Run
+  - Microsoft\Windows\CurrentVersion\RunOnce
+  - Microsoft\Windows\CurrentVersion\Explorer\Shell Folders
+  - Microsoft\Windows NT\CurrentVersion\Winlogon
+  - Microsoft\Windows NT\CurrentVersion\ProfileList
+  - System\CurrentControlSet\Control\ComputerName\ComputerName
+  - System\CurrentControlSet\Control\ComputerName\ActiveComputerName
+  - System\CurrentControlSet\Services\Tcpip\Parameters
+  - System\CurrentControlSet\Control\Session Manager\Environment

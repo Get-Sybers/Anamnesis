@@ -1,0 +1,21 @@
+# Static enrichment tables (loaded by enrich.go via go:embed — not hardcoded).
+
+# One canonical name per well-known account, applied store-wide so `user` means
+# the same string in every table for the same SID.
+well_known_sids:
+  S-1-5-18: Local System
+  S-1-5-19: Local Service
+  S-1-5-20: Network Service
+
+# Process-context properties a spoke may inherit from its owning process (filtered
+# per object by the CAR model, filled only where the spoke's own value is null).
+inherit_fields:
+  - exe
+  - image_path
+  - command_line
+  - user
+  - sid
+  - uid
+  - fqdn
+  - hostname
+  - ppid
