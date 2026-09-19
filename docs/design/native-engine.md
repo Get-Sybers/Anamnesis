@@ -132,7 +132,7 @@ Downstream consumers were audited:
 - **byakugan** (`sources/memory.yaml`): `input_pattern: car.db`, `mappings: []` —
   it passes the finished CAR through **1:1** and joins on `memory_proc_offset`.
   **`car.db` is the hard contract.**
-- **DX_DFIR** volatility lane: `docker run`s the image, reads the per-image output
+- **DX_DFIR** memory lane: `docker run`s the image, reads the per-image output
   tree; the CAR lane feeds byakugan the `car.db`.
 
 anamnesis therefore reproduces, per image:
@@ -172,7 +172,7 @@ The user's directive is a full rename ("everything"). Layers:
    Go module `anamnesis`.
 2. **Docker image** `get-sybers/piiat-mem` → `get-sybers/anamnesis`;
    **env contract** `PIIAT_*` → `ANAMNESIS_*` (GoDFIR-toolz Dockerfile + build-all.sh,
-   DX_DFIR ansible volatility lane, `images.yml`, Go health check).
+   DX_DFIR ansible memory lane, `images.yml`, Go health check).
 3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/Anamnesis` — done by the owner
    in GitHub settings, and it must happen **before the images are built**: the
    GoDFIR-toolz Dockerfile clones `Get-Sybers/Anamnesis` at the `sources.yml` pin, so

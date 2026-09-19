@@ -165,7 +165,7 @@ renames since the old file: `flow.protocol` → `transport_protocol` (+`applicat
 `tcp_flags`), `registry.edit` → `key_edit`/`value_edit`, `user_session.logon_id` →
 `login_id` (the interactive/local/rdp/remote actions folded into a `login_type`
 field). `mappings.py` targets these authoritative names; the KQL `Car*` views still
-use the old names and need the same alignment (deferred — see the volatility lane).
+use the old names and need the same alignment (deferred — see the memory lane).
 
 ---
 
