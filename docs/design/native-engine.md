@@ -81,27 +81,28 @@ Data flow (Plaso-shaped, unchanged): **extract → normalize → store →
 output**. Collectors are the extraction analogues; each emits raw records under
 the **same field/column names** the old per-plugin JSONL used, so the normalize maps
 (and the golden tests) port across verbatim. The raw per-collector JSONL is retained
-for traceability under `plugins/<name>.jsonl` (see §4 on why the name stays).
+for traceability under `plugins/<name>.jsonl` (see §4 — the name is part of the
+output contract).
 
 ### 2.1 Collectors ↔ MemProcFS ↔ CAR
 
-Every collector keeps its plugin *name* (the identity the pipeline and idempotency
-key on) and emits the columns `normalize` already expects. The native source changes;
-the record shape does not.
+Every collector owns a stable plugin *name* (the identity the pipeline and
+idempotency key on) and emits the columns `normalize` already expects. The native
+source changes; the record shape does not.
 
-| collector (name kept) | CAR object / action | MemProcFS source | fidelity note |
+| collector | CAR object / action | MemProcFS source | fidelity note |
 |---|---|---|---|
-| `windows.piiat.processes` | process / create | `GetProcessInfoAll` (PID, PPID, `EPROCESS` VA, name, full path, cmdline, create time), PEB read, token via `/sys` | **`guid = proc-<hex EPROCESS VA>`**, `Offset = EPROCESS VA` — the definitive identity byakugan joins on (`memory_proc_offset`). `Hidden` = process seen by pool/scan but not the active list. |
-| `windows.piiat.threads` | thread / create | `GetThreadList(pid)` (TID, create time, stack base/limit, start addr) + owning `EPROCESS` VA | emits `OwnerOffset` → **definitive** owner link |
-| `windows.piiat.modules` | module / load | `GetModuleList(pid)` (base, full path, name, load time) + owning `EPROCESS` VA | emits `OwnerOffset` → **definitive** |
-| `windows.piiat.network` | flow / socket | `GetNetList` (proto, endpoints, state, pid, create time) + owning `EPROCESS` VA | listener→socket, connection→flow (variant predicate unchanged) |
-| `windows.piiat.files` | file (store-only) | `GetHandleList(pid)` filtered to File handles (path, granted access) + owning `EPROCESS` VA | one event per (FILE_OBJECT, observing process) — owners memory-native |
-| `windows.piiat.access` | process / access | `GetHandleList(pid)` filtered to Process handles (target pid/name/`EPROCESS` VA, granted access) | initiator + target both by `EPROCESS` VA |
-| `windows.piiat.registry` | registry / value_edit | `GetRegistrySubKeys`/`GetRegistryValues` over the curated key list (hive, key, value, type, data, last-write) | user via hive path / ProfileList (enrichment) |
-| `windows.piiat.sessions` | user_session / login | token AuthenticationId LUID per process (`/sys` + token) | LUID identity = real `login_id` |
+| `windows.anamnesis.processes` | process / create | `GetProcessInfoAll` (PID, PPID, `EPROCESS` VA, name, full path, cmdline, create time), PEB read, token via `/sys` | **`guid = proc-<hex EPROCESS VA>`**, `Offset = EPROCESS VA` — the definitive identity byakugan joins on (`memory_proc_offset`). `Hidden` = process seen by pool/scan but not the active list. |
+| `windows.anamnesis.threads` | thread / create | `GetThreadList(pid)` (TID, create time, stack base/limit, start addr) + owning `EPROCESS` VA | emits `OwnerOffset` → **definitive** owner link |
+| `windows.anamnesis.modules` | module / load | `GetModuleList(pid)` (base, full path, name, load time) + owning `EPROCESS` VA | emits `OwnerOffset` → **definitive** |
+| `windows.anamnesis.network` | flow / socket | `GetNetList` (proto, endpoints, state, pid, create time) + owning `EPROCESS` VA | listener→socket, connection→flow (variant predicate unchanged) |
+| `windows.anamnesis.files` | file (store-only) | `GetHandleList(pid)` filtered to File handles (path, granted access) + owning `EPROCESS` VA | one event per (FILE_OBJECT, observing process) — owners memory-native |
+| `windows.anamnesis.access` | process / access | `GetHandleList(pid)` filtered to Process handles (target pid/name/`EPROCESS` VA, granted access) | initiator + target both by `EPROCESS` VA |
+| `windows.anamnesis.registry` | registry / value_edit | `GetRegistrySubKeys`/`GetRegistryValues` over the curated key list (hive, key, value, type, data, last-write) | user via hive path / ProfileList (enrichment) |
+| `windows.anamnesis.sessions` | user_session / login | token AuthenticationId LUID per process (`/sys` + token) | LUID identity = real `login_id` |
 | `windows.svcscan` | service (store-only) | `GetServiceList` (name, pid, image path, cmdline, state) | pid → heuristic owner |
 | `windows.modules` | driver / load | `GetKDriverList` (name, base, path) | kernel-global, no owner |
-| `windows.netstat` | flow / socket | `GetNetList` (second view; dedupes against piiat.network by 5-tuple) | pid → heuristic |
+| `windows.netstat` | flow / socket | `GetNetList` (second view; dedupes against anamnesis.network by 5-tuple) | pid → heuristic |
 | `windows.filescan` | file (store-only) | forensic VFS file scan (`/forensic/…`) — ownerless FILE_OBJECTs | none (no owner) |
 | `windows.mftscan.MFTScan` | file / create | forensic NTFS MFT (`/forensic/ntfs/…`) — SI/FILE_NAME times | timestomp tell preserved (SI vs FN birth time) |
 | `windows.malfind` | (trigger, not stored) | VAD walk: private, executable, non-image regions | overlay retrieves the stored process at output time |
@@ -119,7 +120,7 @@ reused PID (`docs/design/car-store.md` §3). MemProcFS exposes each process's
 `EPROCESS` virtual address (`GetProcessInfoAll`), and its per-process module/thread/
 handle enumerations are produced *from* that `EPROCESS`, so anamnesis emits
 `OwnerOffset = <owning EPROCESS VA>` on every spoke exactly as the
-`windows.piiat.*` plugins did. `enrich` is unchanged: join on `OwnerOffset` →
+`windows.anamnesis.*` plugins did. `enrich` is unchanged: join on `OwnerOffset` →
 `link_confidence="definitive"`, else the `(pid, create-time window)` join →
 `"heuristic"`. `process.guid = "proc-<hex EPROCESS VA>"` and `native.Offset =
 <EPROCESS VA>` are preserved verbatim, which is also the cross-source join key
@@ -144,12 +145,12 @@ anamnesis therefore reproduces, per image:
   events + the malfind overlay (standalone / non-`--no-timeline`).
 - `car/<object>.csv` — per-object CSV (`--format csv`).
 - `plugins/<name>.jsonl` — raw per-collector records, for traceability. The names
-  stay the same plugin ids (`windows.piiat.processes`, …) because the batch
-  idempotency and plugin-set selection (`--plugins`, `ANAMNESIS_PLUGINS`)
-  key on them; the *columns* are anamnesis's own but mirror the old ones.
+  are the plugin ids (`windows.anamnesis.processes`, …): the batch idempotency and
+  plugin-set selection (`--plugins`, `ANAMNESIS_PLUGINS`) key on them; the
+  *columns* mirror the old per-plugin JSONL so the normalize maps port verbatim.
 
 The env-driven batch contract (self-orchestrating container) is reproduced with the
-renamed env vars (§6): discover images, per-plugin idempotency, one JSON summary line,
+`ANAMNESIS_*` env vars (§6): discover images, per-plugin idempotency, one JSON summary line,
 exit codes 0/1/2 — identical semantics to the previous Python batch script.
 
 ## 5. Testing
@@ -164,23 +165,21 @@ exit codes 0/1/2 — identical semantics to the previous Python batch script.
   M57, lonewolf) once the image + libs are present. This is called out at every
   collector as the remaining gate.
 
-## 6. Rename: PIIAT-Mem → anamnesis
+## 6. Naming
 
-The user's directive is a full rename ("everything"). Layers:
+One name everywhere — `anamnesis`:
 
-1. **Tool / CLI / package / module** → `anamnesis` (this repo). Binary `anamnesis`;
-   Go module `anamnesis`.
-2. **Docker image** `get-sybers/piiat-mem` → `get-sybers/anamnesis`;
-   **env contract** `PIIAT_*` → `ANAMNESIS_*` (GoDFIR-toolz Dockerfile + build-all.sh,
-   DX_DFIR ansible memory lane, `images.yml`, Go health check).
-3. **GitHub repo** `Get-Sybers/PIIAT-Mem` → `Get-Sybers/Anamnesis` — done by the owner
-   in GitHub settings, and it must happen **before the images are built**: the
-   GoDFIR-toolz Dockerfile clones `Get-Sybers/Anamnesis` at the `sources.yml` pin, so
-   the rename is a build prerequisite (GitHub redirects the old URL, but the rename
-   should land first). Every cross-repo reference (`sources.yml` key + URL, byakugan
-   `sources/memory.yaml` url, doc links) already points at the new name.
-4. **Docs / branding** across all four repos: READMEs, `docs/`, CHANGELOGs, and the
-   "Put It In A Timeline (Memory)" backronym.
+1. **Tool / CLI / package / module**: binary `anamnesis`; Go module `anamnesis`
+   (this repo).
+2. **Docker image** `get-sybers/anamnesis`; **env contract** `ANAMNESIS_*`
+   (GoDFIR-toolz Dockerfile + build-all.sh, DX_DFIR ansible memory lane,
+   `images.yml`, Go health check).
+3. **GitHub repo** `Get-Sybers/Anamnesis` — the GoDFIR-toolz Dockerfile clones it
+   at the `sources.yml` pin, and every cross-repo reference (`sources.yml` key +
+   URL, byakugan `sources/memory.yaml` url, doc links) points at it.
+4. **Plugin ids** `windows.anamnesis.*` — the collector names §2.1 lists, the
+   `supersedes` table, the `plugins/<name>.jsonl` filenames and `--plugins` /
+   `ANAMNESIS_PLUGINS` selection all carry the same family.
 
 ## 7. Container (GoDFIR-toolz)
 
@@ -203,7 +202,8 @@ no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out 
 5. Volatility engine removed (Python package, plugins, renderer, old Dockerfile). ✅
 6. Static delegation tables moved to embedded YAML (§2). ✅
 7. GoDFIR-toolz image + DX_DFIR wiring + ecosystem rename sweep. ✅
-8. **Prerequisite before building images:** the GitHub repo rename (§6.3).
+8. GitHub repo renamed (`Get-Sybers/Anamnesis`); plugin ids renamed
+   (`windows.anamnesis.*`, §6.4). ✅
 9. Remaining: on-target validation on the standard corpora (field parity + the
    `TODO(on-target)` engine items); pin `MEMPROCFS_SHA256`.
 

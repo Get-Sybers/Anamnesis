@@ -20,17 +20,17 @@
 # A map with `variants` (ordered {predicate, map}) + `default` splits one plugin
 # across objects (bound socket vs. connection flow).
 
-# A piiat.* plugin supersedes the built-in it improves on: when the NEW plugin's
+# An anamnesis.* plugin supersedes the built-in it improves on: when the NEW plugin's
 # JSONL is present, the OLD one's is skipped at store-build time.
 supersedes:
-  windows.piiat.threads: windows.thrdscan
-  windows.piiat.modules: windows.dlllist
-  windows.piiat.network: windows.netscan
-  windows.piiat.sessions: windows.sessions
+  windows.anamnesis.threads: windows.thrdscan
+  windows.anamnesis.modules: windows.dlllist
+  windows.anamnesis.network: windows.netscan
+  windows.anamnesis.sessions: windows.sessions
 
 mappings:
   # ---- process — the hub; identity already synthesized by the plugin ----------
-  windows.piiat.processes:
+  windows.anamnesis.processes:
     object: process
     action: create
     ts: CreateTime
@@ -53,7 +53,7 @@ mappings:
     keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, LogonId]
 
   # ---- process ACCESS events -------------------------------------------------
-  windows.piiat.access:
+  windows.anamnesis.access:
     object: process
     action: access
     ts: null
@@ -81,8 +81,8 @@ mappings:
       extension: {ext: Filename}
     keep: ["Record Number", "Attribute Type", "MFT Type", Modified, Updated, Accessed, Offset, Permissions]
 
-  # ---- the piiat.* family: every spoke emits OwnerOffset ----------------------
-  windows.piiat.threads:
+  # ---- the anamnesis.* family: every spoke emits OwnerOffset ----------------------
+  windows.anamnesis.threads:
     object: thread
     action: create
     ts: CreateTime
@@ -102,7 +102,7 @@ mappings:
       user_stack_limit: UserStackLimit
     keep: [ExitTime, StartAddress, StartPath, StartFunction]
 
-  windows.piiat.modules:
+  windows.anamnesis.modules:
     object: module
     action: load
     ts: LoadTime
@@ -116,7 +116,7 @@ mappings:
       pid: PID
     keep: [Size, LoadCount, ProcessName]
 
-  windows.piiat.network:
+  windows.anamnesis.network:
     variants:
       - predicate: is_bound_socket
         map:
@@ -152,7 +152,7 @@ mappings:
         exe: Owner
       keep: [State, Offset, Proto]
 
-  windows.piiat.files:
+  windows.anamnesis.files:
     object: file
     action: null
     ts: null
@@ -166,7 +166,7 @@ mappings:
       pid: PID
     keep: [HandleValue, GrantedAccess, FileObjectOffset, ProcessName]
 
-  windows.piiat.sessions:
+  windows.anamnesis.sessions:
     object: user_session
     action: login
     ts: CreateTime
@@ -220,7 +220,7 @@ mappings:
     keep: [Size]
 
   # &socket / &flow define the shared bound-socket + connection shapes once;
-  # netstat reuses them by alias. (piiat.network above adds OwnerOffset, so it is
+  # netstat reuses them by alias. (anamnesis.network above adds OwnerOffset, so it is
   # written out rather than aliased.)
   windows.netscan:
     variants:
@@ -273,7 +273,7 @@ mappings:
       extension: {ext: Name}
     keep: []
 
-  windows.piiat.registry:
+  windows.anamnesis.registry:
     object: registry
     action: value_edit
     ts: LastWrite

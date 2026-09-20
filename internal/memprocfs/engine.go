@@ -6,7 +6,7 @@
 // The definitive-link identity is the process's _EPROCESS virtual address
 // (Process.EPROCESS): the collectors stamp it as the process guid
 // ("proc-<hex>") and as every spoke's OwnerOffset, exactly as the
-// windows.piiat.* plugins did — so enrichment links by the kernel's own pointer,
+// windows.anamnesis.* plugins did — so enrichment links by the kernel's own pointer,
 // not the reused PID.
 package memprocfs
 
@@ -45,20 +45,20 @@ type Module struct {
 
 // Thread is one thread (GetThreadList + callstack).
 type Thread struct {
-	TID               uint32
-	ETHREAD           uint64
-	CreateTime        string
-	ExitTime          string
-	Win32StartAddress uint64
-	Win32StartPath    string
+	TID                uint32
+	ETHREAD            uint64
+	CreateTime         string
+	ExitTime           string
+	Win32StartAddress  uint64
+	Win32StartPath     string
 	Win32StartFunction string
-	StartAddress      uint64
-	StartPath         string
-	StartFunction     string
-	StackBase         uint64
-	StackLimit        uint64
-	UserStackBase     uint64
-	UserStackLimit    uint64
+	StartAddress       uint64
+	StartPath          string
+	StartFunction      string
+	StackBase          uint64
+	StackLimit         uint64
+	UserStackBase      uint64
+	UserStackLimit     uint64
 }
 
 // Handle is one kernel handle held by a process (GetHandleList). For File handles
@@ -198,4 +198,3 @@ type OpenOptions struct {
 // Open is defined per build: the default build returns a clear "no native backend"
 // error; the memprocfs-tagged build wires the MemProcFS vmm library. This lets the
 // whole pipeline build and test with CGO_ENABLED=0 and no native library present.
-

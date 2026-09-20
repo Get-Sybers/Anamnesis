@@ -34,7 +34,7 @@ func str(ev car.Event, k string) string { return value.Str(ev[k]) }
 func i64(ev car.Event, k string) int64  { n, _ := value.Int(ev[k]); return n }
 
 func TestNormalizeProcessExeIsBasename(t *testing.T) {
-	ev := Normalize("windows.piiat.processes", procRec(10, 4, 0xabc, "x.exe", `C:\dir\x.exe`, "2020-01-01T00:00:10+00:00"))
+	ev := Normalize("windows.anamnesis.processes", procRec(10, 4, 0xabc, "x.exe", `C:\dir\x.exe`, "2020-01-01T00:00:10+00:00"))
 	if str(ev, "car_object") != "process" || str(ev, "car_action") != "create" {
 		t.Fatalf("object/action: %v/%v", ev["car_object"], ev["car_action"])
 	}
@@ -58,7 +58,7 @@ func TestNormalizeEpochSentinelTimestampDropped(t *testing.T) {
 }
 
 func TestNormalizeRegistryUserFromHiveAndAction(t *testing.T) {
-	ev := Normalize("windows.piiat.registry", car.Record{
+	ev := Normalize("windows.anamnesis.registry", car.Record{
 		"Hive": `\??\C:\Users\alice\NTUSER.DAT`, "Key": `Software\Run`,
 		"ValueName": "x", "ValueData": "y", "ValueType": "REG_SZ", "LastWrite": "2020-01-02"})
 	if str(ev, "car_action") != "value_edit" || str(ev, "user") != "alice" {
@@ -96,7 +96,7 @@ func TestNetscanListenerIsSocketConnectionIsFlow(t *testing.T) {
 }
 
 func TestRegistryDefaultValueKeepsItsGuid(t *testing.T) {
-	ev := Normalize("windows.piiat.registry", car.Record{
+	ev := Normalize("windows.anamnesis.registry", car.Record{
 		"Hive": "SOFTWARE", "Key": `Microsoft\Windows\Run`, "ValueName": "",
 		"ValueData": "x", "ValueType": "REG_SZ", "LastWrite": "2020-01-02"})
 	if str(ev, "guid") != `registry-SOFTWARE-Microsoft\Windows\Run-` {
@@ -105,7 +105,7 @@ func TestRegistryDefaultValueKeepsItsGuid(t *testing.T) {
 }
 
 func TestProcessImagePathNeverABareName(t *testing.T) {
-	ev := Normalize("windows.piiat.processes", procRec(10, 4, 0xa, "truncatedname14", nil, "2020-01-01T00:00:10+00:00"))
+	ev := Normalize("windows.anamnesis.processes", procRec(10, 4, 0xa, "truncatedname14", nil, "2020-01-01T00:00:10+00:00"))
 	if ev["image_path"] != nil {
 		t.Errorf("image_path = %v, want nil", ev["image_path"])
 	}
@@ -115,7 +115,7 @@ func TestProcessImagePathNeverABareName(t *testing.T) {
 }
 
 func TestThreadStartModuleNeverMixedSource(t *testing.T) {
-	ev := Normalize("windows.piiat.threads", car.Record{
+	ev := Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 1, "PID": 10, "TID": 7, "CreateTime": "2020-01-01T00:00:20+00:00",
 		"Win32StartAddress": 0xBAD, "Win32StartPath": nil,
 		"StartAddress": 0x100, "StartPath": `\Windows\System32\ntdll.dll`})
@@ -132,7 +132,7 @@ func TestThreadStartModuleNeverMixedSource(t *testing.T) {
 }
 
 func TestProcessEnvVarsAndThreadStartFunctionMapped(t *testing.T) {
-	p := Normalize("windows.piiat.processes", car.Record{
+	p := Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "x.exe", "Path": `C:\x.exe`, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": "2020-01-01T00:00:10+00:00",
@@ -142,12 +142,12 @@ func TestProcessEnvVarsAndThreadStartFunctionMapped(t *testing.T) {
 	if str(p, "env_vars") != `PATH=C:\; TEMP=C:\Temp` {
 		t.Errorf("env_vars = %v", p["env_vars"])
 	}
-	tr := Normalize("windows.piiat.threads", car.Record{
+	tr := Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 1, "OwnerOffset": 0xa, "PID": 10, "TID": 7,
-		"CreateTime": "2020-01-01T00:00:20+00:00",
+		"CreateTime":        "2020-01-01T00:00:20+00:00",
 		"Win32StartAddress": 0x140, "Win32StartPath": `\Windows\System32\mssrch.dll`,
 		"Win32StartFunction": "DllCanUnloadNow+0x10",
-		"StartPath": `\Windows\System32\ntdll.dll`, "StartFunction": "RtlUserThreadStart"})
+		"StartPath":          `\Windows\System32\ntdll.dll`, "StartFunction": "RtlUserThreadStart"})
 	if str(tr, "start_function") != "DllCanUnloadNow+0x10" {
 		t.Errorf("start_function = %v", tr["start_function"])
 	}
@@ -161,7 +161,7 @@ func TestProcessEnvVarsAndThreadStartFunctionMapped(t *testing.T) {
 }
 
 func TestAccessEventNormalizesInitiatorAndTargetGuids(t *testing.T) {
-	a := Normalize("windows.piiat.access", car.Record{
+	a := Normalize("windows.anamnesis.access", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "csrss.exe", "HandleValue": 756,
 		"GrantedAccess": 0x1FFFFF, "TargetOffset": 0xb, "TargetPid": 996, "TargetName": "svchost.exe"})
 	if str(a, "car_object") != "process" || str(a, "car_action") != "access" {
@@ -172,11 +172,11 @@ func TestAccessEventNormalizesInitiatorAndTargetGuids(t *testing.T) {
 	}
 }
 
-func TestPiiatFilesGuidPerProcessObservation(t *testing.T) {
-	f1 := Normalize("windows.piiat.files", car.Record{
+func TestAnamnesisFilesGuidPerProcessObservation(t *testing.T) {
+	f1 := Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 3})
-	f2 := Normalize("windows.piiat.files", car.Record{
+	f2 := Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xb, "PID": 11, "ProcessName": "y.exe", "HandleValue": 8,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 1})
 	if str(f1, "guid") == str(f2, "guid") {

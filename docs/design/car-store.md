@@ -17,13 +17,13 @@ join-able but carry no time.
 
 | CAR object | memory plugin | unique identity | action | timestamp (source) | timelineable |
 |---|---|---|---|---|---|
-| process | `windows.piiat.processes` | `pid` | create | CreateTime | yes |
+| process | `windows.anamnesis.processes` | `pid` | create | CreateTime | yes |
 | thread | `windows.thrdscan` | `tgt_pid` + `tgt_tid` | create | create time | yes |
 | module | `windows.dlllist` | `pid` + `module_path` (`base_address`) | load | LoadTime | yes |
 | flow | `windows.netscan` / `netstat` (connected rows) | protocol + 5-tuple | start | Created | yes |
 | socket | `windows.netscan` / `netstat` (bound/LISTENING rows) | protocol + local endpoint + pid | listen | Created | yes |
 | user_session | `windows.sessions` | `logon_id` (+ `user`) | login | create time | yes |
-| registry | `windows.piiat.registry` | `hive`+`key`+`value` | edit | LastWrite | yes |
+| registry | `windows.anamnesis.registry` | `hive`+`key`+`value` | edit | LastWrite | yes |
 | driver | `windows.modules` | `image_path` + `base_address` | load | — | no (store-only) |
 | file | `windows.filescan` | `file_path` | — | — | no (store-only) |
 | service | `windows.svcscan` | `name` (+ `pid`) | — | — | no (store-only) |
@@ -126,7 +126,7 @@ the reused PID:
   scan offset: netscan's physical and netstat's virtual offsets aren't comparable,
   and dual-stack twins share one offset · driver `(image_path|module_name, base_address)`
 - registry `(hive, key, value, last_write)` · user_session `(token AuthenticationId LUID — the real login_id)`
-- file: filescan rows `(FILE_OBJECT offset)` — ownerless scan observations; piiat.files
+- file: filescan rows `(FILE_OBJECT offset)` — ownerless scan observations; anamnesis.files
   rows `(FILE_OBJECT offset, observing PID)` — one event per (file, process-holding-a-handle)
 - service `(name)`
 
@@ -170,7 +170,7 @@ use the old names and need the same alignment (deferred — see the memory lane)
 ---
 
 **Status:** implemented (v0.3.0), and §3's **definitive tier is now real**
-(v0.4.0): the `windows.piiat.*` family — threads, modules, files, network,
+(v0.4.0): the `windows.anamnesis.*` family — threads, modules, files, network,
 sessions, plus the token-upgraded processes — emits `OwnerOffset` (the owning
 `_EPROCESS` address) on every spoke, and enrichment links on it with
 `link_confidence="definitive"`, falling back to the create-time-window PID join
@@ -186,7 +186,7 @@ provably-fillable CAR property to filled — host identity (hostname/fqdn from t
 image's own registry, l2t-processor convention), process cwd / integrity_level /
 env_vars, thread start_function (export resolution), registry new_content, file
 extension, service paths for stopped services, spoke ppid inheritance. Two
-capabilities the audit surfaced were added: **`windows.piiat.access`**
+capabilities the audit surfaced were added: **`windows.anamnesis.access`**
 (Process-type handles → CAR process `access` events with access_level /
 target_*), and **`windows.mftscan.MFTScan`** integration (memory-resident $MFT →
 file `create` events with creation_time and, on an SI/FILE_NAME birth-time
@@ -220,5 +220,5 @@ the CAR fields come from what was already extracted.
 **Export dedup:** not needed. Enrichment's `_dedupe` (identity + action +
 target_guid + access_level) plus timestamp-gating leaves the exported timeline
 duplicate-free — measured 0 exact-duplicate rows on a real ~45k-event timeline;
-cross-source file evidence (filescan / piiat.files / mftscan) is intentionally
+cross-source file evidence (filescan / anamnesis.files / mftscan) is intentionally
 distinct and only the timestamped MFT records reach the timeline.
