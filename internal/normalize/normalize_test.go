@@ -172,7 +172,7 @@ func TestAccessEventNormalizesInitiatorAndTargetGuids(t *testing.T) {
 	}
 }
 
-func TestPiiatFilesGuidPerProcessObservation(t *testing.T) {
+func TestAnamnesisFilesGuidPerProcessObservation(t *testing.T) {
 	f1 := Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 3})

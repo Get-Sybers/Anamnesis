@@ -255,7 +255,7 @@ func TestOwningOffsetMissFallsBackToPIDHeuristic(t *testing.T) {
 	}
 }
 
-func TestPiiatFilesEventPerProcessObservation(t *testing.T) {
+func TestAnamnesisFilesEventPerProcessObservation(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
 	f1 := tag(normalize.Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
@@ -310,7 +310,7 @@ func TestTokenlessSessionRowNotPhantom(t *testing.T) {
 	}
 }
 
-func TestPiiatSessionsLUIDIdentityAndNativeProcessUser(t *testing.T) {
+func TestAnamnesisSessionsLUIDIdentityAndNativeProcessUser(t *testing.T) {
 	p := normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "x.exe", "Path": `C:\x.exe`, "CommandLine": "c",
