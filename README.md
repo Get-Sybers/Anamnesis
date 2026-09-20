@@ -45,14 +45,14 @@ idempotency contract). The native source is MemProcFS; the record shape is uncha
 
 | collector | CAR object / action | source (MemProcFS) |
 |---|---|---|
-| `windows.piiat.processes` | process / create | process list + PEB/token (EPROCESS VA = guid) |
-| `windows.piiat.threads` | thread / create | per-process thread list (+ OwnerOffset) |
-| `windows.piiat.modules` | module / load | per-process module list (+ OwnerOffset) |
-| `windows.piiat.network` | flow / socket | net list (+ OwnerOffset) |
+| `windows.anamnesis.processes` | process / create | process list + PEB/token (EPROCESS VA = guid) |
+| `windows.anamnesis.threads` | thread / create | per-process thread list (+ OwnerOffset) |
+| `windows.anamnesis.modules` | module / load | per-process module list (+ OwnerOffset) |
+| `windows.anamnesis.network` | flow / socket | net list (+ OwnerOffset) |
 | `windows.netstat` | flow / socket | net list (second view) |
-| `windows.piiat.files` | file (store-only) | per-process File handles (+ OwnerOffset) |
-| `windows.piiat.access` | process / access | per-process Process handles (target = object EPROCESS) |
-| `windows.piiat.sessions` | user_session / login | process token LUID |
+| `windows.anamnesis.files` | file (store-only) | per-process File handles (+ OwnerOffset) |
+| `windows.anamnesis.access` | process / access | per-process Process handles (target = object EPROCESS) |
+| `windows.anamnesis.sessions` | user_session / login | process token LUID |
 | `windows.svcscan` | service (store-only) | service list |
 | `windows.modules` | driver / load | kernel driver list |
 | `windows.filescan` | file (store-only) | forensic file scan |

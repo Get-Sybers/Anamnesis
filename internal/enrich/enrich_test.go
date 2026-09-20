@@ -15,7 +15,7 @@ import (
 func tag(ev car.Event) car.Event { ev["source_image"] = "img.mem"; return ev }
 
 func proc(pid, ppid, offset int, name, path, ts string) car.Event {
-	return normalize.Normalize("windows.piiat.processes", car.Record{
+	return normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": offset, "Guid": fmt.Sprintf("proc-%x", offset), "PID": pid, "PPID": ppid,
 		"ImageFileName": name, "Path": path, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": ts, "DllCount": 0,
@@ -171,16 +171,16 @@ func TestModuleImagePathInheritedFromOwner(t *testing.T) {
 }
 
 func TestRegistryUserFromSIDHiveViaProfileList(t *testing.T) {
-	profile := tag(normalize.Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\SystemRoot\System32\Config\SOFTWARE`,
-		"Key":  `\REGISTRY\MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\S-1-5-21-1474204758-2504895174-1356074821-1001`,
+	profile := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+		"Hive":      `\SystemRoot\System32\Config\SOFTWARE`,
+		"Key":       `\REGISTRY\MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\S-1-5-21-1474204758-2504895174-1356074821-1001`,
 		"ValueName": "ProfileImagePath", "ValueData": `C:\Users\Steve`,
 		"ValueType": "REG_EXPAND_SZ", "LastWrite": "2019-01-28"}))
-	sidRow := tag(normalize.Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\REGISTRY\USER\S-1-5-21-1474204758-2504895174-1356074821-1001`,
-		"Key":  `...\Software\Microsoft\Windows\CurrentVersion\Run`,
+	sidRow := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+		"Hive":      `\REGISTRY\USER\S-1-5-21-1474204758-2504895174-1356074821-1001`,
+		"Key":       `...\Software\Microsoft\Windows\CurrentVersion\Run`,
 		"ValueName": "x", "ValueData": "y", "ValueType": "REG_SZ", "LastWrite": "2019-01-29"}))
-	classes := tag(normalize.Normalize("windows.piiat.registry", car.Record{
+	classes := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
 		"Hive": `\REGISTRY\USER\S-1-5-21-1474204758-2504895174-1356074821-1001_Classes`,
 		"Key":  `...\ms-settings\shell\open\command`, "ValueName": "",
 		"ValueData": "cmd.exe", "ValueType": "REG_SZ", "LastWrite": "2019-01-29"}))
@@ -229,10 +229,10 @@ func TestDistinctUsersSameSessionIDDoNotMerge(t *testing.T) {
 
 func TestOwningOffsetLinksDefinitively(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
-	th := tag(normalize.Normalize("windows.piiat.threads", car.Record{
+	th := tag(normalize.Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 99, "OwnerOffset": 0xa, "PID": 10, "TID": 7,
 		"CreateTime": "2020-01-01T00:00:20+00:00",
-		"StackBase": 1000, "StackLimit": 900, "UserStackBase": 2000, "UserStackLimit": 1900}))
+		"StackBase":  1000, "StackLimit": 900, "UserStackBase": 2000, "UserStackLimit": 1900}))
 	out := Enrich([]car.Event{p, th})
 	e := ofObj(out, "thread")[0]
 	if s(e, "owning_guid") != "proc-a" || s(e, "link_confidence") != "definitive" {
@@ -245,7 +245,7 @@ func TestOwningOffsetLinksDefinitively(t *testing.T) {
 
 func TestOwningOffsetMissFallsBackToPIDHeuristic(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
-	th := tag(normalize.Normalize("windows.piiat.threads", car.Record{
+	th := tag(normalize.Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 99, "OwnerOffset": 0xdead, "PID": 10, "TID": 7,
 		"CreateTime": "2020-01-01T00:00:20+00:00"}))
 	out := Enrich([]car.Event{p, th})
@@ -257,10 +257,10 @@ func TestOwningOffsetMissFallsBackToPIDHeuristic(t *testing.T) {
 
 func TestPiiatFilesEventPerProcessObservation(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
-	f1 := tag(normalize.Normalize("windows.piiat.files", car.Record{
+	f1 := tag(normalize.Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 3}))
-	f2 := tag(normalize.Normalize("windows.piiat.files", car.Record{
+	f2 := tag(normalize.Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xb, "PID": 11, "ProcessName": "y.exe", "HandleValue": 8,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 1}))
 	out := Enrich([]car.Event{p, f1, f2})
@@ -280,13 +280,13 @@ func TestPiiatFilesEventPerProcessObservation(t *testing.T) {
 }
 
 func TestWellKnownSIDUserCanonicalStoreWide(t *testing.T) {
-	p := tag(normalize.Normalize("windows.piiat.processes", car.Record{
+	p := tag(normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "svc.exe", "Path": `C:\svc.exe`, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": "2020-01-01T00:00:10+00:00",
 		"DllCount": 0, "LoadedDlls": nil, "Hidden": false,
 		"Sid": "S-1-5-19", "User": "NT Authority", "LogonId": "0x3e5"}))
-	sess := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	sess := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "svc.exe", "SessionId": 0,
 		"LogonId": "0x3e5", "Sid": "S-1-5-19", "User": "LocalService",
 		"CreateTime": "2020-01-01T00:00:10+00:00"}))
@@ -301,7 +301,7 @@ func TestWellKnownSIDUserCanonicalStoreWide(t *testing.T) {
 }
 
 func TestTokenlessSessionRowNotPhantom(t *testing.T) {
-	sess := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	sess := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "SessionId": 1,
 		"LogonId": nil, "Sid": nil, "User": nil, "CreateTime": "2020-01-01T00:00:10+00:00"}))
 	out := Enrich([]car.Event{sess})
@@ -311,7 +311,7 @@ func TestTokenlessSessionRowNotPhantom(t *testing.T) {
 }
 
 func TestPiiatSessionsLUIDIdentityAndNativeProcessUser(t *testing.T) {
-	p := normalize.Normalize("windows.piiat.processes", car.Record{
+	p := normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "x.exe", "Path": `C:\x.exe`, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": "2020-01-01T00:00:10+00:00",
@@ -320,15 +320,15 @@ func TestPiiatSessionsLUIDIdentityAndNativeProcessUser(t *testing.T) {
 	if s(p, "user") != "Steve" || s(p, "sid") != "S-1-5-21-1-2-3-1001" {
 		t.Fatalf("native user/sid: %v/%v", p["user"], p["sid"])
 	}
-	s1 := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	s1 := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "SessionId": 1,
 		"LogonId": "0x338f0", "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve",
 		"CreateTime": "2020-01-01T00:00:10+00:00"}))
-	s2 := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	s2 := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xb, "PID": 11, "ProcessName": "y.exe", "SessionId": 1,
 		"LogonId": "0x338f0", "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve",
 		"CreateTime": "2020-01-01T00:00:30+00:00"}))
-	s3 := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	s3 := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xc, "PID": 12, "ProcessName": "svc.exe", "SessionId": 0,
 		"LogonId": "0x3e7", "Sid": "S-1-5-18", "User": "Local System",
 		"CreateTime": "2020-01-01T00:00:01+00:00"}))
@@ -354,15 +354,15 @@ func TestPiiatSessionsLUIDIdentityAndNativeProcessUser(t *testing.T) {
 }
 
 func TestProcessUIDFromSIDAndSpokesInherit(t *testing.T) {
-	p := tag(normalize.Normalize("windows.piiat.processes", car.Record{
+	p := tag(normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "x.exe", "Path": `C:\x.exe`, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": "2020-01-01T00:00:10+00:00",
 		"DllCount": 0, "LoadedDlls": nil, "Hidden": false,
 		"Sid": "S-1-5-21-1-2-3-1001", "User": "Steve", "LogonId": "0x338f0"}))
-	th := tag(normalize.Normalize("windows.piiat.threads", car.Record{
+	th := tag(normalize.Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 9, "OwnerOffset": 0xa, "PID": 10, "TID": 7, "CreateTime": "2020-01-01T00:00:20+00:00"}))
-	f := tag(normalize.Normalize("windows.piiat.files", car.Record{
+	f := tag(normalize.Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 3}))
 	out := Enrich([]car.Event{p, th, f})
@@ -380,10 +380,10 @@ func TestProcessUIDFromSIDAndSpokesInherit(t *testing.T) {
 
 func TestAccessEventsRideProcessWithTargetIdentity(t *testing.T) {
 	p := tag(proc(10, 4, 0xa, "csrss.exe", `C:\W\csrss.exe`, "2020-01-01T00:00:10+00:00"))
-	a1 := tag(normalize.Normalize("windows.piiat.access", car.Record{
+	a1 := tag(normalize.Normalize("windows.anamnesis.access", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "csrss.exe", "HandleValue": 756,
 		"GrantedAccess": 0x1FFFFF, "TargetOffset": 0xb, "TargetPid": 996, "TargetName": "svchost.exe"}))
-	a2 := tag(normalize.Normalize("windows.piiat.access", car.Record{
+	a2 := tag(normalize.Normalize("windows.anamnesis.access", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "csrss.exe", "HandleValue": 900,
 		"GrantedAccess": 0x1FFFFF, "TargetOffset": 0xc, "TargetPid": 700, "TargetName": "lsass.exe"}))
 	out := Enrich([]car.Event{p, a1, a2})
@@ -443,18 +443,18 @@ func TestMFTRowsMergeWithTimestompTell(t *testing.T) {
 }
 
 func TestHostIdentityFillsEveryObject(t *testing.T) {
-	comp := tag(normalize.Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\REGISTRY\MACHINE\SYSTEM`,
-		"Key":  `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
+	comp := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+		"Hive":      `\REGISTRY\MACHINE\SYSTEM`,
+		"Key":       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
 		"ValueName": "ComputerName", "ValueData": "DESKTOP-8", "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
-	dom := tag(normalize.Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\REGISTRY\MACHINE\SYSTEM`,
-		"Key":  `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Services\Tcpip\Parameters`,
+	dom := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+		"Hive":      `\REGISTRY\MACHINE\SYSTEM`,
+		"Key":       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Services\Tcpip\Parameters`,
 		"ValueName": "DhcpDomain", "ValueData": "localdomain", "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
-	th := tag(normalize.Normalize("windows.piiat.threads", car.Record{
+	th := tag(normalize.Normalize("windows.anamnesis.threads", car.Record{
 		"Offset": 9, "OwnerOffset": 0xa, "PID": 10, "TID": 7, "CreateTime": "2020-01-01T00:00:20+00:00"}))
-	fl := tag(normalize.Normalize("windows.piiat.network", car.Record{
+	fl := tag(normalize.Normalize("windows.anamnesis.network", car.Record{
 		"Offset": 8, "OwnerOffset": 0xa, "Proto": "TCPv4", "LocalAddr": "10.0.0.2",
 		"LocalPort": 5000, "ForeignAddr": "1.2.3.4", "ForeignPort": 443,
 		"State": "ESTABLISHED", "PID": 10, "Owner": "x.exe", "Created": "2020-01-01T00:01:00+00:00"}))
@@ -471,9 +471,9 @@ func TestHostIdentityFillsEveryObject(t *testing.T) {
 }
 
 func TestDottedComputerNameIsFQDN(t *testing.T) {
-	comp := tag(normalize.Normalize("windows.piiat.registry", car.Record{
-		"Hive": `\REGISTRY\MACHINE\SYSTEM`,
-		"Key":  `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
+	comp := tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+		"Hive":      `\REGISTRY\MACHINE\SYSTEM`,
+		"Key":       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
 		"ValueName": "ComputerName", "ValueData": "HOST1.EXAMPLE.COM", "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
 	proc0 := ofObj(Enrich([]car.Event{comp, p}), "process")[0]
@@ -484,9 +484,9 @@ func TestDottedComputerNameIsFQDN(t *testing.T) {
 
 func TestActiveComputerNameFallbackAndBootWins(t *testing.T) {
 	mk := func(sub, data string) car.Event {
-		return tag(normalize.Normalize("windows.piiat.registry", car.Record{
-			"Hive": `\REGISTRY\MACHINE\SYSTEM`,
-			"Key":  `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\` + sub,
+		return tag(normalize.Normalize("windows.anamnesis.registry", car.Record{
+			"Hive":      `\REGISTRY\MACHINE\SYSTEM`,
+			"Key":       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\` + sub,
 			"ValueName": "ComputerName", "ValueData": data, "ValueType": "REG_SZ", "LastWrite": "2019-01-28"}))
 	}
 	p := tag(proc(10, 4, 0xa, "x.exe", `C:\x.exe`, "2020-01-01T00:00:10+00:00"))
@@ -512,7 +512,7 @@ func TestNoRegistryLeavesHostnameNull(t *testing.T) {
 }
 
 func TestLoginSuccessfulTrueByExistence(t *testing.T) {
-	sess := tag(normalize.Normalize("windows.piiat.sessions", car.Record{
+	sess := tag(normalize.Normalize("windows.anamnesis.sessions", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "SessionId": 1,
 		"LogonId": "0x338f0", "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve",
 		"CreateTime": "2020-01-01T00:00:10+00:00"}))

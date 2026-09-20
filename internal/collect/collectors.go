@@ -8,7 +8,7 @@ import (
 	"anamnesis/internal/memprocfs"
 )
 
-// collectProcesses -> windows.piiat.processes. One row per process, keyed by the
+// collectProcesses -> windows.anamnesis.processes. One row per process, keyed by the
 // _EPROCESS virtual address (Offset/Guid). Hidden = present but not in the active
 // list (the psscan/pslist contrast, here process enumeration vs the active list).
 func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
@@ -25,9 +25,9 @@ func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
 			"Path": nilIfEmpty(p.Path), "CommandLine": nilIfEmpty(p.CommandLine),
 			"ParentPath": nilIfEmpty(p.ParentPath), "CreateTime": nilIfEmpty(p.CreateTime),
 			"DllCount": len(p.DLLPaths), "LoadedDlls": joinOrNil(p.DLLPaths),
-			"Hidden":         active != nil && !active[p.PID],
-			"Sid":            nilIfEmpty(p.SID), "User": nilIfEmpty(p.User),
-			"LogonId":        nilIfEmpty(p.LogonID), "Cwd": nilIfEmpty(p.Cwd),
+			"Hidden": active != nil && !active[p.PID],
+			"Sid":    nilIfEmpty(p.SID), "User": nilIfEmpty(p.User),
+			"LogonId": nilIfEmpty(p.LogonID), "Cwd": nilIfEmpty(p.Cwd),
 			"IntegrityLevel": nilIfEmpty(p.IntegrityLevel), "EnvVars": nilIfEmpty(p.EnvVars),
 		})
 	}
@@ -54,7 +54,7 @@ func collectPslist(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectThreads -> windows.piiat.threads. OwnerOffset stamped from the process
+// collectThreads -> windows.anamnesis.threads. OwnerOffset stamped from the process
 // being enumerated, so the owner link is definitive.
 func collectThreads(eng memprocfs.Engine) ([]car.Record, error) {
 	procs, err := eng.Processes()
@@ -83,7 +83,7 @@ func collectThreads(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectModules -> windows.piiat.modules. OwnerOffset stamped from the process.
+// collectModules -> windows.anamnesis.modules. OwnerOffset stamped from the process.
 func collectModules(eng memprocfs.Engine) ([]car.Record, error) {
 	procs, err := eng.Processes()
 	if err != nil {
@@ -138,13 +138,13 @@ func netRecords(eng memprocfs.Engine, withOwner bool) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectNetwork -> windows.piiat.network (definitive owner via OwnerOffset).
+// collectNetwork -> windows.anamnesis.network (definitive owner via OwnerOffset).
 func collectNetwork(eng memprocfs.Engine) ([]car.Record, error) { return netRecords(eng, true) }
 
 // collectNetstat -> windows.netstat (second view; owner heuristic by pid).
 func collectNetstat(eng memprocfs.Engine) ([]car.Record, error) { return netRecords(eng, false) }
 
-// collectFiles -> windows.piiat.files. Handle-enumerated File handles, one CAR
+// collectFiles -> windows.anamnesis.files. Handle-enumerated File handles, one CAR
 // event per (FILE_OBJECT, observing process); owner definitive via OwnerOffset.
 func collectFiles(eng memprocfs.Engine) ([]car.Record, error) {
 	procs, err := eng.Processes()
@@ -171,7 +171,7 @@ func collectFiles(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectAccess -> windows.piiat.access. Process-type handles = observed
+// collectAccess -> windows.anamnesis.access. Process-type handles = observed
 // "A holds access to B" facts.
 func collectAccess(eng memprocfs.Engine) ([]car.Record, error) {
 	procs, err := eng.Processes()
@@ -199,7 +199,7 @@ func collectAccess(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectSessions -> windows.piiat.sessions. One row per process; the token LUID
+// collectSessions -> windows.anamnesis.sessions. One row per process; the token LUID
 // is the login identity (enrichment collapses to one login per LUID).
 func collectSessions(eng memprocfs.Engine) ([]car.Record, error) {
 	procs, err := eng.Processes()
@@ -252,7 +252,7 @@ func collectDrivers(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectRegistry -> windows.piiat.registry (curated keys).
+// collectRegistry -> windows.anamnesis.registry (curated keys).
 func collectRegistry(eng memprocfs.Engine) ([]car.Record, error) {
 	vals, err := eng.RegistryValues(DefaultRegistryTargets)
 	if err != nil {

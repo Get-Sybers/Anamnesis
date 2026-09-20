@@ -16,7 +16,7 @@ import (
 //go:embed mappings.yaml
 var mappingsYAML []byte
 
-// mappings: plugin name -> its CAR map. SUPERSEDES: a piiat.* plugin -> the
+// mappings: plugin name -> its CAR map. SUPERSEDES: a anamnesis.* plugin -> the
 // built-in it supersedes. Both are loaded from mappings.yaml at package init.
 var (
 	mappings   map[string]*carMap
@@ -28,7 +28,7 @@ var predicates = map[string]func(car.Record) bool{
 	"is_bound_socket": isBoundSocket,
 }
 
-// isBoundSocket: a netscan/netstat/piiat.network row that is a bound/listening
+// isBoundSocket: a netscan/netstat/anamnesis.network row that is a bound/listening
 // socket, not a connection (LISTENING, or no real foreign endpoint).
 func isBoundSocket(rec car.Record) bool {
 	if value.Str(rec["State"]) == "LISTENING" {

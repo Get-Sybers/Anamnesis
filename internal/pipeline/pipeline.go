@@ -40,7 +40,7 @@ func BuildStore(outDir, sourceImage string) (*store.Store, error) {
 				present[strings.TrimSuffix(e.Name(), jsonlExt)] = true
 			}
 		}
-		// a superseded built-in is skipped when its piiat.* successor is present
+		// a superseded built-in is skipped when its anamnesis.* successor is present
 		superseded := map[string]bool{}
 		for new, old := range normalize.SUPERSEDES {
 			if present[new] {

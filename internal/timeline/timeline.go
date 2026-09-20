@@ -82,7 +82,7 @@ func MalfindOverlay(st *store.Store, outDir string) []car.Event {
 		}
 		start := r["Start VPN"]
 		entries = append(entries, car.Event{
-			"timestamp": proc["timestamp"],
+			"timestamp":  proc["timestamp"],
 			"car_object": "module", "car_action": "load",
 			"guid":            "module-" + value.Str(r["PID"]) + "-" + value.Str(start),
 			"owning_guid":     proc["guid"],

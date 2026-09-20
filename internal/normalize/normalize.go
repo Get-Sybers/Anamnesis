@@ -240,7 +240,7 @@ type variant struct {
 
 type carMap struct {
 	object       string
-	action       any // nil == None
+	action       any    // nil == None
 	ts           string // "" == None (no field carries the timestamp)
 	guid         guidSpec
 	owningPID    string // "" == none

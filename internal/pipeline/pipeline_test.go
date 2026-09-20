@@ -19,7 +19,7 @@ import (
 func tag(ev car.Event) car.Event { ev["source_image"] = "img.mem"; return ev }
 
 func procRec(pid, ppid, offset int, name, path, ts string) car.Event {
-	return tag(normalize.Normalize("windows.piiat.processes", car.Record{
+	return tag(normalize.Normalize("windows.anamnesis.processes", car.Record{
 		"Offset": offset, "Guid": fmt.Sprintf("proc-%x", offset), "PID": pid, "PPID": ppid,
 		"ImageFileName": name, "Path": path, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": ts, "DllCount": 0,
@@ -115,7 +115,7 @@ func TestSupersededBuiltinJSONLSkipped(t *testing.T) {
 	writeJSONL(t, filepath.Join(plug, "windows.sessions.jsonl"), []car.Record{{
 		"Session ID": 1, "User Name": `HOST\Steve`, "Process ID": 10,
 		"Process": "x.exe", "Create Time": "2019-01-28T19:40:32+00:00"}})
-	writeJSONL(t, filepath.Join(plug, "windows.piiat.sessions.jsonl"), []car.Record{{
+	writeJSONL(t, filepath.Join(plug, "windows.anamnesis.sessions.jsonl"), []car.Record{{
 		"OwnerOffset": 10, "PID": 10, "ProcessName": "x.exe", "SessionId": 1,
 		"LogonId": "0x338f0", "Sid": "S-1-5-21-1-2-3-1001", "User": "Steve",
 		"CreateTime": "2019-01-28T19:40:32+00:00"}})
@@ -138,7 +138,7 @@ func TestMalfindOverlayRetrievesStoredProcess(t *testing.T) {
 	dir := t.TempDir()
 	plug := filepath.Join(dir, "plugins")
 	os.MkdirAll(plug, 0o755)
-	writeJSONL(t, filepath.Join(plug, "windows.piiat.processes.jsonl"), []car.Record{{
+	writeJSONL(t, filepath.Join(plug, "windows.anamnesis.processes.jsonl"), []car.Record{{
 		"Offset": 0xa, "Guid": "proc-a", "PID": 10, "PPID": 4,
 		"ImageFileName": "MsMpEng.exe", "Path": `C:\W\MsMpEng.exe`, "CommandLine": "c",
 		"ParentPath": nil, "CreateTime": "2020-01-01T00:00:10+00:00", "DllCount": 0,

@@ -26,7 +26,9 @@ func (fakeEngine) Processes() ([]memprocfs.Process, error) {
 		{PID: 4, PPID: 0, EPROCESS: epP2, Name: "System", CreateTime: "2020-01-01T00:00:01+00:00"},
 	}, nil
 }
-func (fakeEngine) ActivePIDs() (map[uint32]bool, error) { return map[uint32]bool{10: true, 4: true}, nil }
+func (fakeEngine) ActivePIDs() (map[uint32]bool, error) {
+	return map[uint32]bool{10: true, 4: true}, nil
+}
 func (fakeEngine) Modules(pid uint32) ([]memprocfs.Module, error) {
 	if pid != 10 {
 		return nil, nil
@@ -66,14 +68,14 @@ func (fakeEngine) Drivers() ([]memprocfs.Driver, error) {
 }
 func (fakeEngine) RegistryValues(_ []string) ([]memprocfs.RegValue, error) {
 	return []memprocfs.RegValue{{
-		Hive: `\REGISTRY\MACHINE\SYSTEM`,
-		Key:  `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
+		Hive:      `\REGISTRY\MACHINE\SYSTEM`,
+		Key:       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
 		ValueName: "ComputerName", ValueType: "REG_SZ", ValueData: "DESKTOP-8",
 		LastWrite: "2019-01-28T00:00:00+00:00"}}, nil
 }
-func (fakeEngine) Info() (map[string]string, error)   { return map[string]string{"Is64Bit": "True"}, nil }
-func (fakeEngine) Banners() ([]string, error)          { return []string{"Windows 10"}, nil }
-func (fakeEngine) MFT() ([]memprocfs.MFTRecord, error) { return nil, nil }
+func (fakeEngine) Info() (map[string]string, error)          { return map[string]string{"Is64Bit": "True"}, nil }
+func (fakeEngine) Banners() ([]string, error)                { return []string{"Windows 10"}, nil }
+func (fakeEngine) MFT() ([]memprocfs.MFTRecord, error)       { return nil, nil }
 func (fakeEngine) FileScan() ([]memprocfs.FileObject, error) { return nil, nil }
 func (fakeEngine) Malfind() ([]memprocfs.MalRegion, error)   { return nil, nil }
 func (fakeEngine) Close() error                              { return nil }

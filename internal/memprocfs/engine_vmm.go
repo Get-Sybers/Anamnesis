@@ -322,7 +322,7 @@ func (e *vmmEngine) Banners() ([]string, error) {
 // Forensic collectors — TODO(on-target): read MemProcFS forensic VFS
 // (/forensic/ntfs, /forensic/csv) for MFT + ownerless files, and derive malfind
 // from the VAD map (private + executable + non-image regions).
-func (e *vmmEngine) MFT() ([]MFTRecord, error)      { return nil, nil }
+func (e *vmmEngine) MFT() ([]MFTRecord, error)       { return nil, nil }
 func (e *vmmEngine) FileScan() ([]FileObject, error) { return nil, nil }
 func (e *vmmEngine) Malfind() ([]MalRegion, error)   { return nil, nil }
 

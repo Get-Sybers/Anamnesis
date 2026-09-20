@@ -4,6 +4,17 @@ All notable changes are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Breaking: the collector/plugin-id family `windows.piiat.*` is renamed
+  `windows.anamnesis.*`** (processes, threads, modules, network, files, access,
+  sessions, registry) — the last of the pre-rename naming. The ids flow through
+  `--plugins` / `ANAMNESIS_PLUGINS` selection, the `plugins/<plugin>.jsonl`
+  filenames, the `supersedes` table and `car.db` provenance. Output trees written
+  by earlier releases keep the old names; rerun the tool (or `ANAMNESIS_FORCE=1`)
+  to re-key them.
+
 ## [2.0.0] - 2026-09-19
 
 **Renamed to anamnesis, and the Volatility 3 (Python) engine is gone.** anamnesis

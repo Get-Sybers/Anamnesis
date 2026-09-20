@@ -5,19 +5,19 @@
 default_plugins:
   - banners.Banners
   - windows.info
-  - windows.piiat.processes
+  - windows.anamnesis.processes
   - windows.pslist
-  - windows.piiat.modules
+  - windows.anamnesis.modules
   - windows.modules
-  - windows.piiat.network
+  - windows.anamnesis.network
   - windows.netstat
-  - windows.piiat.sessions
+  - windows.anamnesis.sessions
   - windows.filescan
-  - windows.piiat.files
+  - windows.anamnesis.files
   - windows.svcscan
-  - windows.piiat.threads
-  - windows.piiat.registry
-  - windows.piiat.access
+  - windows.anamnesis.threads
+  - windows.anamnesis.registry
+  - windows.anamnesis.access
   - windows.mftscan.MFTScan
   - windows.malfind
 
