@@ -20,7 +20,7 @@
 # A map with `variants` (ordered {predicate, map}) + `default` splits one plugin
 # across objects (bound socket vs. connection flow).
 
-# A anamnesis.* plugin supersedes the built-in it improves on: when the NEW plugin's
+# An anamnesis.* plugin supersedes the built-in it improves on: when the NEW plugin's
 # JSONL is present, the OLD one's is skipped at store-build time.
 supersedes:
   windows.anamnesis.threads: windows.thrdscan

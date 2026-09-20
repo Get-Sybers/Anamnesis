@@ -16,7 +16,7 @@ import (
 //go:embed mappings.yaml
 var mappingsYAML []byte
 
-// mappings: plugin name -> its CAR map. SUPERSEDES: a anamnesis.* plugin -> the
+// mappings: plugin name -> its CAR map. SUPERSEDES: an anamnesis.* plugin -> the
 // built-in it supersedes. Both are loaded from mappings.yaml at package init.
 var (
 	mappings   map[string]*carMap
