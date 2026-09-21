@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -26,15 +27,19 @@ func TestInputDirFromEnvFallbackWarns(t *testing.T) {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
+	var closeW sync.Once
+	closeWriter := func() {
+		closeW.Do(func() { _ = w.Close() })
+	}
 	t.Cleanup(func() {
 		os.Stderr = oldStderr
-		_ = w.Close()
+		closeWriter()
 		_ = r.Close()
 	})
 
 	got := inputDirFromEnv()
 
-	_ = w.Close()
+	closeWriter()
 	out, _ := io.ReadAll(r)
 
 	if got != "/legacy-memory" {
