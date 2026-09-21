@@ -8,8 +8,10 @@ package collect
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -107,7 +109,11 @@ type Result struct {
 
 // Run executes the named collectors over one image, writing each one's records to
 // <outDir>/plugins/<name>.jsonl. An unknown name is reported, not fatal.
-func Run(eng memprocfs.Engine, outDir string, names []string) []Result {
+// A collector that does not complete within timeout (0 disables the watchdog)
+// has STALLED inside the native engine: its call cannot be cancelled and the
+// engine's native locks must be treated as poisoned, so Run stops there and
+// returns the stalled collector's name — the caller re-execs to recover.
+func Run(eng memprocfs.Engine, outDir string, names []string, timeout time.Duration) ([]Result, string) {
 	plugDir := filepath.Join(outDir, "plugins")
 	os.MkdirAll(plugDir, 0o755)
 	var results []Result
@@ -119,7 +125,12 @@ func Run(eng memprocfs.Engine, outDir string, names []string) []Result {
 				Error: "unknown collector"})
 			continue
 		}
-		recs, err := c.Collect(eng)
+		recs, stalled, err := runOne(eng, c, timeout)
+		if stalled {
+			results = append(results, Result{Plugin: name, Output: out, OK: false,
+				Error: fmt.Sprintf("stalled: no completion within %s", timeout)})
+			return results, name
+		}
 		writeErr := writeJSONL(out, recs)
 		res := Result{Plugin: name, Output: out, Rows: len(recs), OK: err == nil && writeErr == nil}
 		if err != nil {
@@ -129,7 +140,34 @@ func Run(eng memprocfs.Engine, outDir string, names []string) []Result {
 		}
 		results = append(results, res)
 	}
-	return results
+	return results, ""
+}
+
+// runOne executes one collector under the stall watchdog. A stalled collector's
+// goroutine stays blocked inside the native engine until the process is
+// replaced; nothing here can cancel it.
+func runOne(eng memprocfs.Engine, c Collector, timeout time.Duration) ([]car.Record, bool, error) {
+	if timeout <= 0 {
+		recs, err := c.Collect(eng)
+		return recs, false, err
+	}
+	type outcome struct {
+		recs []car.Record
+		err  error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		recs, err := c.Collect(eng)
+		ch <- outcome{recs, err}
+	}()
+	watchdog := time.NewTimer(timeout)
+	defer watchdog.Stop()
+	select {
+	case o := <-ch:
+		return o.recs, false, o.err
+	case <-watchdog.C:
+		return nil, true, nil
+	}
 }
 
 func writeJSONL(path string, recs []car.Record) error {

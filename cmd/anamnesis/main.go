@@ -96,7 +96,13 @@ func runSingle(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	results := collect.Run(eng, out, names)
+	results, stalled := collect.Run(eng, out, names, stallTimeout())
+	if stalled != "" {
+		// Single-image debug mode: report the stall and exit — no re-exec, and no
+		// Close (it would block on the same poisoned native locks).
+		fmt.Fprintf(os.Stderr, "  [ERR] %s: stalled in the native engine\n", stalled)
+		return 1
+	}
 	eng.Close()
 
 	ok := 0

@@ -96,6 +96,12 @@ docker run --rm --network none --read-only --tmpfs /tmp \
 Any CLI argument switches to single-image pass-through
 (`... get-sybers/anamnesis -f /input/<image> -o /out`).
 
+A collector blocked inside the native engine past `ANAMNESIS_STALL_TIMEOUT`
+(a Go duration, default `5m`; `0` disables) is recorded as stalled
+(`plugins/<plugin>.stalled`) and the batch re-execs itself: completed
+collectors skip, the stalled one is retried, and after two stalls it is
+skipped as failed — a poisoned native call never wedges the batch.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
