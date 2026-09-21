@@ -277,8 +277,10 @@ func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline 
 	logln(fmt.Sprintf("[%s] image=%s dest=%s plugins=%s", tool, img, dest, strings.Join(todo, ",")))
 
 	eng, err := memprocfs.Open(img, memprocfs.OpenOptions{
-		LibPath: os.Getenv("ANAMNESIS_VMM_LIB"), SymbolsDir: symbolsDir,
-		SymbolsOnline: symbolsOnline})
+		LibPath:       os.Getenv("ANAMNESIS_VMM_LIB"),
+		SymbolsDir:    symbolsDir,
+		SymbolsOnline: symbolsOnline,
+	})
 	if err != nil {
 		logln("engine open failed: " + err.Error())
 		os.WriteFile(logPath, []byte(log.String()), 0o644)
