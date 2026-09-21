@@ -278,7 +278,7 @@ func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline 
 
 	eng, err := memprocfs.Open(img, memprocfs.OpenOptions{
 		LibPath: os.Getenv("ANAMNESIS_VMM_LIB"), SymbolsDir: symbolsDir,
-		SymbolsOnline: symbolsOnline, Forensic: true})
+		SymbolsOnline: symbolsOnline})
 	if err != nil {
 		logln("engine open failed: " + err.Error())
 		os.WriteFile(logPath, []byte(log.String()), 0o644)

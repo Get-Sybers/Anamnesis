@@ -191,7 +191,12 @@ type OpenOptions struct {
 	SymbolsDir string
 	// SymbolsOnline allows the engine to fetch PDB symbols over the network.
 	SymbolsOnline bool
-	// Forensic enables MemProcFS forensic mode (needed for MFT / file scan).
+	// Forensic enables MemProcFS forensic mode. Nothing consumes it yet (the
+	// MFT / file-scan / malfind collectors are on-target stubs), and its
+	// background plugin init deadlocks vmm.so 5.18 — an ObjFile↔Registry lock
+	// inversion between FcNtfs2 and MFcAmcache/MFcRegistry initializers that
+	// wedges every later map call (GetHandleList observed). Leave it off until
+	// a consumer exists AND the open gates on forensic-init completion.
 	Forensic bool
 }
 
