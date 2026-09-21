@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"anamnesis/internal/collect"
 	"anamnesis/internal/memprocfs"
@@ -24,6 +27,13 @@ import (
 //	ANAMNESIS_FORCE          1/true/yes/on: rerun collectors with valid output
 //	ANAMNESIS_SYMBOLS_ONLINE 1/true/yes/on: this container has network for PDB fetch
 //	ANAMNESIS_VMM_LIB        path to the MemProcFS vmm library
+//	ANAMNESIS_STALL_TIMEOUT  per-collector stall watchdog, a Go duration (default 5m; 0 disables)
+//
+// A collector blocked inside the native engine past ANAMNESIS_STALL_TIMEOUT is a
+// stall: the call cannot be cancelled and the engine's native locks must be
+// treated as poisoned, so the batch records it (plugins/<name>.stalled) and
+// re-execs itself — completed collectors skip, the stalled one is retried, and
+// after two stalls it is skipped as failed.
 //
 // Output per image: <out>/<clean name>/plugins/<plugin>.jsonl + car.db +
 // anamnesis.log. stdout: one JSON summary line. Exit 0 normal, 1 nothing
@@ -68,6 +78,54 @@ func envStr(name, def string) string {
 }
 
 func envBool(name string) bool { return trueSet[strings.ToLower(strings.TrimSpace(os.Getenv(name)))] }
+
+// stallTimeout reads ANAMNESIS_STALL_TIMEOUT (a Go duration; 0 disables the
+// watchdog). An unparseable value keeps the default.
+func stallTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ANAMNESIS_STALL_TIMEOUT"))
+	if raw == "" {
+		return 5 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		fmt.Fprintf(os.Stderr, "[%s] ignoring invalid ANAMNESIS_STALL_TIMEOUT %q\n", tool, raw)
+		return 5 * time.Minute
+	}
+	return d
+}
+
+// maxStalls is how many stalls a collector gets before it is skipped as failed.
+const maxStalls = 2
+
+func stallPath(dest, plugin string) string {
+	return filepath.Join(dest, "plugins", plugin+".stalled")
+}
+
+func stallCount(dest, plugin string) int {
+	b, err := os.ReadFile(stallPath(dest, plugin))
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n
+}
+
+func bumpStall(dest, plugin string) {
+	os.MkdirAll(filepath.Join(dest, "plugins"), 0o755)
+	os.WriteFile(stallPath(dest, plugin), []byte(strconv.Itoa(stallCount(dest, plugin)+1)+"\n"), 0o644)
+}
+
+// reexec replaces this process with a fresh copy of itself: the only way to
+// shed a thread blocked inside the native engine. The new process resumes
+// idempotently over the same output tree.
+func reexec() {
+	exe, err := os.Executable()
+	if err == nil {
+		err = syscall.Exec(exe, os.Args, os.Environ())
+	}
+	fmt.Fprintf(os.Stderr, "[%s] re-exec failed: %v\n", tool, err)
+	os.Exit(2)
+}
 
 func inputDirFromEnv() string {
 	if v := strings.TrimSpace(os.Getenv("ANAMNESIS_INPUT_DIR")); v != "" {
@@ -160,9 +218,13 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 
 		var todo []string
 		for _, p := range plugins {
-			if !force && pluginDone(dest, p) {
+			switch {
+			case !force && pluginDone(dest, p):
 				sum.Skipped++
-			} else {
+			case stallCount(dest, p) >= maxStalls:
+				sum.Failed++
+				pi.Empty = append(pi.Empty, p)
+			default:
 				todo = append(todo, p)
 			}
 		}
@@ -170,9 +232,15 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 		if len(todo) > 0 {
 			fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — running %d collector(s) (%d already done)\n",
 				tool, idx+1, len(images), rel, len(todo), len(plugins)-len(todo))
-			logTail := runImage(img, dest, todo, symbolsDir, symbolsOnline)
+			logTail, stalled := runImage(img, dest, todo, symbolsDir, symbolsOnline)
+			if stalled != "" {
+				fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — collector %s stalled (attempt %d/%d); re-executing to recover\n",
+					tool, idx+1, len(images), rel, stalled, stallCount(dest, stalled), maxStalls)
+				reexec()
+			}
 			for _, p := range todo {
 				if validJSONL(outPath(dest, p)) {
+					os.Remove(stallPath(dest, p))
 					sum.Processed++
 					pi.Produced = append(pi.Produced, p)
 				} else {
@@ -201,8 +269,11 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 
 // runImage opens the engine, runs the todo collectors into dest/plugins, and
 // rebuilds car.db from all raw JSONL on disk. Returns a short log tail for
-// diagnostics when the run produced nothing.
-func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline bool) string {
+// diagnostics when the run produced nothing, and the name of a collector that
+// stalled inside the native engine ("" when none) — the stall is already
+// recorded and the engine is deliberately NOT closed then, since Close would
+// block on the same poisoned locks; the caller re-execs to recover.
+func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline bool) (string, string) {
 	logPath := filepath.Join(dest, "anamnesis.log")
 	var log strings.Builder
 	logln := func(s string) { log.WriteString(s + "\n") }
@@ -214,24 +285,31 @@ func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline 
 	if err != nil {
 		logln("engine open failed: " + err.Error())
 		os.WriteFile(logPath, []byte(log.String()), 0o644)
-		return tail(log.String(), 20)
+		return tail(log.String(), 20), ""
 	}
-	defer eng.Close()
 
-	for _, r := range collect.Run(eng, dest, todo) {
+	results, stalled := collect.Run(eng, dest, todo, stallTimeout())
+	for _, r := range results {
 		if r.OK {
 			logln(fmt.Sprintf("  [ok ] %s: %d rows", r.Plugin, r.Rows))
 		} else {
 			logln(fmt.Sprintf("  [ERR] %s: %s", r.Plugin, r.Error))
 		}
 	}
+	if stalled != "" {
+		bumpStall(dest, stalled)
+		os.WriteFile(logPath, []byte(log.String()), 0o644)
+		return tail(log.String(), 20), stalled
+	}
+	eng.Close()
+
 	if st, err := pipeline.BuildStore(dest, filepath.Base(img)); err != nil {
 		logln("build store: " + err.Error())
 	} else {
 		st.Close()
 	}
 	os.WriteFile(logPath, []byte(log.String()), 0o644)
-	return tail(log.String(), 20)
+	return tail(log.String(), 20), ""
 }
 
 // --- discovery / validity ----------------------------------------------------

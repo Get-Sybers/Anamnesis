@@ -2,7 +2,9 @@ package collect
 
 import (
 	"testing"
+	"time"
 
+	"anamnesis/internal/car"
 	"anamnesis/internal/memprocfs"
 	"anamnesis/internal/pipeline"
 	"anamnesis/internal/value"
@@ -19,60 +21,84 @@ const (
 
 func (fakeEngine) Processes() ([]memprocfs.Process, error) {
 	return []memprocfs.Process{
-		{PID: 10, PPID: 4, EPROCESS: epP1, Name: "x.exe", Path: `C:\x.exe`,
+		{
+			PID: 10, PPID: 4, EPROCESS: epP1, Name: "x.exe", Path: `C:\x.exe`,
 			CommandLine: `x.exe -k`, CreateTime: "2020-01-01T00:00:10+00:00",
 			SID: "S-1-5-21-1-2-3-1001", User: "Steve", LogonID: "0x338f0", SessionID: 1,
-			DLLPaths: []string{`C:\Windows\System32\ntdll.dll`}},
+			DLLPaths: []string{`C:\Windows\System32\ntdll.dll`},
+		},
 		{PID: 4, PPID: 0, EPROCESS: epP2, Name: "System", CreateTime: "2020-01-01T00:00:01+00:00"},
 	}, nil
 }
+
 func (fakeEngine) ActivePIDs() (map[uint32]bool, error) {
 	return map[uint32]bool{10: true, 4: true}, nil
 }
+
 func (fakeEngine) Modules(pid uint32) ([]memprocfs.Module, error) {
 	if pid != 10 {
 		return nil, nil
 	}
-	return []memprocfs.Module{{Base: 0x7ff0, Name: "ntdll.dll",
-		Path: `C:\Windows\System32\ntdll.dll`, LoadTime: "2020-01-01T00:00:11+00:00"}}, nil
+	return []memprocfs.Module{{
+		Base: 0x7ff0, Name: "ntdll.dll",
+		Path: `C:\Windows\System32\ntdll.dll`, LoadTime: "2020-01-01T00:00:11+00:00",
+	}}, nil
 }
+
 func (fakeEngine) Threads(pid uint32) ([]memprocfs.Thread, error) {
 	if pid != 10 {
 		return nil, nil
 	}
-	return []memprocfs.Thread{{TID: 7, ETHREAD: 0x1111, CreateTime: "2020-01-01T00:00:20+00:00",
-		Win32StartAddress: 0x140, StackBase: 1000, StackLimit: 900}}, nil
+	return []memprocfs.Thread{{
+		TID: 7, ETHREAD: 0x1111, CreateTime: "2020-01-01T00:00:20+00:00",
+		Win32StartAddress: 0x140, StackBase: 1000, StackLimit: 900,
+	}}, nil
 }
+
 func (fakeEngine) Handles(pid uint32) ([]memprocfs.Handle, error) {
 	if pid != 10 {
 		return nil, nil
 	}
 	return []memprocfs.Handle{
-		{Type: "File", HandleValue: 4, GrantedAccess: 0x120089, ObjectVA: 0xF11E,
-			Name: `\Device\HarddiskVolume2\secret.docx`},
-		{Type: "Process", HandleValue: 900, GrantedAccess: 0x1FFFFF,
-			TargetPID: 4, TargetName: "System", TargetEPROCESS: epP2},
+		{
+			Type: "File", HandleValue: 4, GrantedAccess: 0x120089, ObjectVA: 0xF11E,
+			Name: `\Device\HarddiskVolume2\secret.docx`,
+		},
+		{
+			Type: "Process", HandleValue: 900, GrantedAccess: 0x1FFFFF,
+			TargetPID: 4, TargetName: "System", TargetEPROCESS: epP2,
+		},
 	}, nil
 }
+
 func (fakeEngine) NetEntries() ([]memprocfs.NetEntry, error) {
-	return []memprocfs.NetEntry{{Offset: 0x2000, Proto: "TCPv4", LocalAddr: "10.0.0.2",
+	return []memprocfs.NetEntry{{
+		Offset: 0x2000, Proto: "TCPv4", LocalAddr: "10.0.0.2",
 		LocalPort: 5000, ForeignAddr: "1.2.3.4", ForeignPort: 443, State: "ESTABLISHED",
-		PID: 10, Owner: "x.exe", Created: "2020-01-01T00:01:00+00:00"}}, nil
+		PID: 10, Owner: "x.exe", Created: "2020-01-01T00:01:00+00:00",
+	}}, nil
 }
+
 func (fakeEngine) Services() ([]memprocfs.Service, error) {
-	return []memprocfs.Service{{Offset: 0x5, Name: "svc", PID: 10, Binary: `C:\svc.exe`,
-		State: "RUNNING"}}, nil
+	return []memprocfs.Service{{
+		Offset: 0x5, Name: "svc", PID: 10, Binary: `C:\svc.exe`,
+		State: "RUNNING",
+	}}, nil
 }
+
 func (fakeEngine) Drivers() ([]memprocfs.Driver, error) {
 	return []memprocfs.Driver{{Offset: 0x9, Name: "ntfs.sys", Path: `C:\Windows\System32\drivers\ntfs.sys`, Base: 0xfff0}}, nil
 }
+
 func (fakeEngine) RegistryValues(_ []string) ([]memprocfs.RegValue, error) {
 	return []memprocfs.RegValue{{
 		Hive:      `\REGISTRY\MACHINE\SYSTEM`,
 		Key:       `\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\ComputerName\ComputerName`,
 		ValueName: "ComputerName", ValueType: "REG_SZ", ValueData: "DESKTOP-8",
-		LastWrite: "2019-01-28T00:00:00+00:00"}}, nil
+		LastWrite: "2019-01-28T00:00:00+00:00",
+	}}, nil
 }
+
 func (fakeEngine) Info() (map[string]string, error)          { return map[string]string{"Is64Bit": "True"}, nil }
 func (fakeEngine) Banners() ([]string, error)                { return []string{"Windows 10"}, nil }
 func (fakeEngine) MFT() ([]memprocfs.MFTRecord, error)       { return nil, nil }
@@ -82,7 +108,10 @@ func (fakeEngine) Close() error                              { return nil }
 
 func TestCollectorsToCarDB(t *testing.T) {
 	dir := t.TempDir()
-	results := Run(fakeEngine{}, dir, Names())
+	results, stalled := Run(fakeEngine{}, dir, Names(), 0)
+	if stalled != "" {
+		t.Fatalf("unexpected stall: %s", stalled)
+	}
 	for _, r := range results {
 		if !r.OK {
 			t.Errorf("collector %s failed: %s", r.Plugin, r.Error)
@@ -151,5 +180,23 @@ func TestCollectorsToCarDB(t *testing.T) {
 	// registry ComputerName row is stored and drove host identity
 	if counts["registry"] != 1 {
 		t.Errorf("registry rows = %d, want 1", counts["registry"])
+	}
+}
+
+// The stall watchdog: a collector blocked inside the native engine trips the
+// timeout and is reported stalled; a healthy collector is untouched by it.
+func TestRunOneStallWatchdog(t *testing.T) {
+	block := Collector{Name: "block", Collect: func(memprocfs.Engine) ([]car.Record, error) {
+		select {} // blocked forever, like a poisoned native call
+	}}
+	if _, stalled, _ := runOne(fakeEngine{}, block, 50*time.Millisecond); !stalled {
+		t.Fatal("watchdog did not fire on a blocked collector")
+	}
+	healthy := Collector{Name: "healthy", Collect: func(memprocfs.Engine) ([]car.Record, error) {
+		return []car.Record{{"k": "v"}}, nil
+	}}
+	recs, stalled, err := runOne(fakeEngine{}, healthy, time.Second)
+	if stalled || err != nil || len(recs) != 1 {
+		t.Fatalf("healthy collector misreported: stalled=%v err=%v recs=%d", stalled, err, len(recs))
 	}
 }
