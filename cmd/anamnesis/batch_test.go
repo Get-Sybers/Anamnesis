@@ -28,6 +28,7 @@ func TestInputDirFromEnvFallbackWarns(t *testing.T) {
 	os.Stderr = w
 	t.Cleanup(func() {
 		os.Stderr = oldStderr
+		_ = w.Close()
 		_ = r.Close()
 	})
 
