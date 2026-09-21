@@ -160,10 +160,12 @@ func runOne(eng memprocfs.Engine, c Collector, timeout time.Duration) ([]car.Rec
 		recs, err := c.Collect(eng)
 		ch <- outcome{recs, err}
 	}()
+	watchdog := time.NewTimer(timeout)
+	defer watchdog.Stop()
 	select {
 	case o := <-ch:
 		return o.recs, false, o.err
-	case <-time.After(timeout):
+	case <-watchdog.C:
 		return nil, true, nil
 	}
 }

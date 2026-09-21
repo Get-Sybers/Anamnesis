@@ -101,7 +101,7 @@ func runSingle(argv []string) int {
 		// Single-image debug mode: report the stall and exit — no re-exec, and no
 		// Close (it would block on the same poisoned native locks).
 		fmt.Fprintf(os.Stderr, "  [ERR] %s: stalled in the native engine\n", stalled)
-		os.Exit(1)
+		return 1
 	}
 	eng.Close()
 

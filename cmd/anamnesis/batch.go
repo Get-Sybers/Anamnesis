@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"anamnesis/internal/collect"
@@ -110,21 +109,14 @@ func stallCount(dest, plugin string) int {
 	return n
 }
 
-func bumpStall(dest, plugin string) {
-	os.MkdirAll(filepath.Join(dest, "plugins"), 0o755)
-	os.WriteFile(stallPath(dest, plugin), []byte(strconv.Itoa(stallCount(dest, plugin)+1)+"\n"), 0o644)
-}
-
-// reexec replaces this process with a fresh copy of itself: the only way to
-// shed a thread blocked inside the native engine. The new process resumes
-// idempotently over the same output tree.
-func reexec() {
-	exe, err := os.Executable()
-	if err == nil {
-		err = syscall.Exec(exe, os.Args, os.Environ())
+// bumpStall persists the stall marker the recovery depends on: an unwritable
+// marker would re-exec forever, so its error is fatal to the caller.
+func bumpStall(dest, plugin string) error {
+	if err := os.MkdirAll(filepath.Join(dest, "plugins"), 0o755); err != nil {
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "[%s] re-exec failed: %v\n", tool, err)
-	os.Exit(2)
+	return os.WriteFile(stallPath(dest, plugin),
+		[]byte(strconv.Itoa(stallCount(dest, plugin)+1)+"\n"), 0o644)
 }
 
 func inputDirFromEnv() string {
@@ -234,6 +226,11 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 				tool, idx+1, len(images), rel, len(todo), len(plugins)-len(todo))
 			logTail, stalled := runImage(img, dest, todo, symbolsDir, symbolsOnline)
 			if stalled != "" {
+				if err := bumpStall(dest, stalled); err != nil {
+					// Without the marker the re-exec would retry forever — fail fast.
+					fmt.Fprintf(os.Stderr, "[%s] cannot persist the stall marker for %s: %v\n", tool, stalled, err)
+					os.Exit(2)
+				}
 				fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — collector %s stalled (attempt %d/%d); re-executing to recover\n",
 					tool, idx+1, len(images), rel, stalled, stallCount(dest, stalled), maxStalls)
 				reexec()
@@ -297,7 +294,6 @@ func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline 
 		}
 	}
 	if stalled != "" {
-		bumpStall(dest, stalled)
 		os.WriteFile(logPath, []byte(log.String()), 0o644)
 		return tail(log.String(), 20), stalled
 	}
