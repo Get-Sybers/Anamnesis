@@ -91,7 +91,10 @@ func runSingle(argv []string) int {
 
 	fmt.Fprintf(os.Stderr, "anamnesis %s: %s -> %s (%s)\n", version, memory, out, format)
 	eng, err := memprocfs.Open(memory, memprocfs.OpenOptions{
-		LibPath: libPath(lib), SymbolsDir: symbols, SymbolsOnline: symbolsOnline, Forensic: true})
+		LibPath:       libPath(lib),
+		SymbolsDir:    symbols,
+		SymbolsOnline: symbolsOnline,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
