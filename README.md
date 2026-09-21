@@ -82,19 +82,19 @@ libraries.
 
 anamnesis stays a standalone tool inside a larger pipeline. In **DX_DFIR** it runs as
 the hardened, env-driven `get-sybers/anamnesis` container: with no arguments it
-discovers every image under `ANAMNESIS_MEMORY_DIR` and writes
+discovers every image under `ANAMNESIS_INPUT_DIR` and writes
 `<out>/<image>/plugins/<plugin>.jsonl` + `car.db`, printing one JSON summary line —
 a drop-in for the previous memory-lane container invocation.
 
 ```
 docker run --rm --network none --read-only --tmpfs /tmp \
   -e ANAMNESIS_PLUGINS= -e ANAMNESIS_FORCE=0 -e ANAMNESIS_SYMBOLS_ONLINE=0 \
-  -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
+  -v "$input_dir:/input:ro" -v "$out:/out" -v "$symbols:/symbols" \
   get-sybers/anamnesis:latest
 ```
 
 Any CLI argument switches to single-image pass-through
-(`... get-sybers/anamnesis -f /mem/<image> -o /out`).
+(`... get-sybers/anamnesis -f /input/<image> -o /out`).
 
 ## License
 
