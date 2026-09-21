@@ -26,13 +26,15 @@ func TestInputDirFromEnvFallbackWarns(t *testing.T) {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = r.Close()
+	})
 
 	got := inputDirFromEnv()
 
 	_ = w.Close()
-	os.Stderr = oldStderr
 	out, _ := io.ReadAll(r)
-	_ = r.Close()
 
 	if got != "/legacy-memory" {
 		t.Fatalf("inputDirFromEnv() = %q, want %q", got, "/legacy-memory")
