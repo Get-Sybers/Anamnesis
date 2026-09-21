@@ -1,0 +1,33 @@
+name: bump-godfir-pin
+
+# A merge to main is an engine release to consumers: open the GoDFIR-toolz PR
+# that moves this engine's Dockerfile pin (and image patch version) to the
+# merged commit, carrying this merge's own PR message. Deterministic — the
+# logic lives in GoDFIR-toolz scripts/bump-engine-pin.sh, and GoDFIR-toolz's
+# pr-checks gate the result. Needs the GODFIR_TOOLZ_PR_TOKEN secret (a
+# fine-grained PAT: GoDFIR-toolz only, contents + pull-requests write).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: engine commit to pin (default, the dispatched head)
+        required: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Get-Sybers/GoDFIR-toolz
+          token: ${{ secrets.GODFIR_TOOLZ_PR_TOKEN }}
+
+      - name: Open the pin PR in GoDFIR-toolz
+        env:
+          GH_TOKEN: ${{ secrets.GODFIR_TOOLZ_PR_TOKEN }}
+          SRC_REPO: ${{ github.repository }}
+          SRC_SHA: ${{ inputs.sha || github.sha }}
+        run: ./scripts/bump-engine-pin.sh anamnesis
