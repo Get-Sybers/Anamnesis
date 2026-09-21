@@ -7,6 +7,11 @@ All notable changes are documented here, following
 ## [Unreleased]
 
 ### Changed
+- Batch input contract normalized to the family standard: the batch orchestrator
+  now reads `ANAMNESIS_INPUT_DIR` (default `/input`) for image discovery. During
+  transition, `ANAMNESIS_MEMORY_DIR` is still accepted as a fallback (with a
+  deprecation notice on stderr when used).
+- Batch JSON summary key renamed from `memory_dir` to `input_dir`.
 - **Breaking: the collector/plugin-id family `windows.piiat.*` is renamed
   `windows.anamnesis.*`** (processes, threads, modules, network, files, access,
   sessions, registry) — the last of the pre-rename naming. The ids flow through

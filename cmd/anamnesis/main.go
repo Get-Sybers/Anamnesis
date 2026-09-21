@@ -7,7 +7,7 @@
 //	anamnesis --list-plugins                         # the default collector set, as JSON
 //
 // With NO arguments it runs the env-driven batch orchestrator (the container
-// ENTRYPOINT): it discovers every image under ANAMNESIS_MEMORY_DIR and processes
+// ENTRYPOINT): it discovers every image under ANAMNESIS_INPUT_DIR and processes
 // each. Pipeline (Plaso-shaped): extract -> normalize -> store -> output.
 package main
 

@@ -173,7 +173,9 @@ One name everywhere — `anamnesis`:
    (this repo).
 2. **Docker image** `get-sybers/anamnesis`; **env contract** `ANAMNESIS_*`
    (GoDFIR-toolz Dockerfile + build-all.sh, DX_DFIR ansible memory lane,
-   `images.yml`, Go health check).
+   `images.yml`, Go health check). Input mount/scan is
+   `ANAMNESIS_INPUT_DIR` (default `/input`), with a temporary fallback to
+   `ANAMNESIS_MEMORY_DIR` for transition.
 3. **GitHub repo** `Get-Sybers/Anamnesis` — the GoDFIR-toolz Dockerfile clones it
    at the `sources.yml` pin, and every cross-repo reference (`sources.yml` key +
    URL, byakugan `sources/memory.yaml` url, doc links) points at it.
@@ -188,7 +190,7 @@ One name everywhere — `anamnesis`:
 runtime carrying the `anamnesis` binary + MemProcFS `.so` files (fetched + checksum-
 pinned from the MemProcFS release), the shared hardener (uid renamed/locked, no shell,
 no package manager), and the same batch ENTRYPOINT semantics. No Python, no Volatility,
-no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out …` with
+no `pip`. The DX_DFIR lane keeps `docker run … -v <input>:/input:ro -v <out>:/out …` with
 `ANAMNESIS_*` env — a drop-in for the previous memory-image invocation.
 
 ## 8. Phasing / status
@@ -206,4 +208,3 @@ no `pip`. The DX_DFIR lane keeps `docker run … -v <mem>:/mem:ro -v <out>:/out 
    (`windows.anamnesis.*`, §6.4). ✅
 9. Remaining: on-target validation on the standard corpora (field parity + the
    `TODO(on-target)` engine items); pin `MEMPROCFS_SHA256`.
-

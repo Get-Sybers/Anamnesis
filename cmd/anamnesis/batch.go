@@ -17,7 +17,7 @@ import (
 // The env-driven batch orchestrator — the container ENTRYPOINT. Faithful port of
 // the original Python batch script, with the ANAMNESIS_* env contract.
 //
-//	ANAMNESIS_MEMORY_DIR     memory image tree, recursed        (default /mem)
+//	ANAMNESIS_INPUT_DIR      memory image tree, recursed        (default /input)
 //	ANAMNESIS_OUT_DIR        output root, one folder per image  (default /out)
 //	ANAMNESIS_SYMBOLS_DIR    PDB/symbol cache (read-write)      (default /symbols)
 //	ANAMNESIS_PLUGINS        comma-separated collectors; empty = the default CAR set
@@ -45,7 +45,7 @@ type perImage struct {
 
 type summary struct {
 	Tool          string     `json:"tool"`
-	MemoryDir     string     `json:"memory_dir"`
+	InputDir      string     `json:"input_dir"`
 	OutDir        string     `json:"out_dir"`
 	SymbolsDir    string     `json:"symbols_dir"`
 	SymbolsOnline bool       `json:"symbols_online"`
@@ -69,6 +69,17 @@ func envStr(name, def string) string {
 
 func envBool(name string) bool { return trueSet[strings.ToLower(strings.TrimSpace(os.Getenv(name)))] }
 
+func inputDirFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("ANAMNESIS_INPUT_DIR")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ANAMNESIS_MEMORY_DIR")); v != "" {
+		fmt.Fprintf(os.Stderr, "[%s] ANAMNESIS_MEMORY_DIR is deprecated; use ANAMNESIS_INPUT_DIR (default /input)\n", tool)
+		return v
+	}
+	return "/input"
+}
+
 func envPlugins() []string {
 	raw := os.Getenv("ANAMNESIS_PLUGINS")
 	var safe []string
@@ -91,7 +102,7 @@ func envPlugins() []string {
 
 func runBatch() int {
 	sum := process(
-		envStr("ANAMNESIS_MEMORY_DIR", "/mem"),
+		inputDirFromEnv(),
 		envStr("ANAMNESIS_OUT_DIR", "/out"),
 		envStr("ANAMNESIS_SYMBOLS_DIR", "/symbols"),
 		envPlugins(),
@@ -115,12 +126,12 @@ func runBatch() int {
 	return 0
 }
 
-func process(memoryDir, outDir, symbolsDir string, plugins []string, force, symbolsOnline bool) summary {
-	sum := summary{Tool: tool, MemoryDir: memoryDir, OutDir: outDir, SymbolsDir: symbolsDir,
+func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbolsOnline bool) summary {
+	sum := summary{Tool: tool, InputDir: inputDir, OutDir: outDir, SymbolsDir: symbolsDir,
 		SymbolsOnline: symbolsOnline, Force: force, Plugins: len(plugins), Results: []perImage{}}
 
-	if fi, err := os.Stat(memoryDir); err != nil || !fi.IsDir() {
-		sum.Error = fmt.Sprintf("memory dir not found or not a directory: %s (mount it, or set ANAMNESIS_MEMORY_DIR)", memoryDir)
+	if fi, err := os.Stat(inputDir); err != nil || !fi.IsDir() {
+		sum.Error = fmt.Sprintf("input dir not found or not a directory: %s (mount /input, or set ANAMNESIS_INPUT_DIR)", inputDir)
 		return sum
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -135,14 +146,14 @@ func process(memoryDir, outDir, symbolsDir string, plugins []string, force, symb
 	os.Remove(probe)
 	os.MkdirAll(symbolsDir, 0o755)
 
-	images := discover(memoryDir)
+	images := discover(inputDir)
 	sum.Images = len(images)
-	fmt.Fprintf(os.Stderr, "[%s] memory_dir=%s out_dir=%s symbols_dir=%s symbols_online=%d force=%d plugins=%d images=%d\n",
-		tool, memoryDir, outDir, symbolsDir, b2i(symbolsOnline), b2i(force), len(plugins), len(images))
+	fmt.Fprintf(os.Stderr, "[%s] input_dir=%s out_dir=%s symbols_dir=%s symbols_online=%d force=%d plugins=%d images=%d\n",
+		tool, inputDir, outDir, symbolsDir, b2i(symbolsOnline), b2i(force), len(plugins), len(images))
 
 	var diagTails []string
 	for idx, img := range images {
-		rel, _ := filepath.Rel(memoryDir, img)
+		rel, _ := filepath.Rel(inputDir, img)
 		dest := filepath.Join(outDir, cleanName(rel))
 		os.MkdirAll(dest, 0o755)
 		pi := perImage{Image: rel, Produced: []string{}, Empty: []string{}}
