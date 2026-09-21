@@ -16,18 +16,27 @@ on:
         description: engine commit to pin (default, the dispatched head)
         required: false
 
+# The job runs entirely on the PAT; the workflow's own GITHUB_TOKEN gets no
+# permissions at all.
+permissions: {}
+
 jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Get-Sybers/GoDFIR-toolz
+          # main deliberately: the bump logic is maintained IN the repo the
+          # resulting PR targets, so it always runs at that repo's current
+          # contract — pinning it here would freeze the very logic the pin
+          # system exists to keep current.
+          ref: main
           token: ${{ secrets.GODFIR_TOOLZ_PR_TOKEN }}
 
       - name: Open the pin PR in GoDFIR-toolz
         env:
           GH_TOKEN: ${{ secrets.GODFIR_TOOLZ_PR_TOKEN }}
           SRC_REPO: ${{ github.repository }}
-          SRC_SHA: ${{ inputs.sha || github.sha }}
+          SRC_SHA: ${{ github.event.inputs.sha || github.sha }}
         run: ./scripts/bump-engine-pin.sh anamnesis
