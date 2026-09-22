@@ -172,15 +172,23 @@ func TestAccessEventNormalizesInitiatorAndTargetGuids(t *testing.T) {
 	}
 }
 
-func TestAnamnesisFilesGuidPerProcessObservation(t *testing.T) {
+func TestAnamnesisFilesGuidIsTheFileObject(t *testing.T) {
 	f1 := Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xa, "PID": 10, "ProcessName": "x.exe", "HandleValue": 4,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 3})
 	f2 := Normalize("windows.anamnesis.files", car.Record{
 		"OwnerOffset": 0xb, "PID": 11, "ProcessName": "y.exe", "HandleValue": 8,
 		"FileObjectOffset": 0xF11E, "Path": `\Device\HarddiskVolume2\secret.docx`, "GrantedAccess": 1})
-	if str(f1, "guid") == str(f2, "guid") {
-		t.Errorf("files should have per-(file,process) guids, both = %v", f1["guid"])
+	// The guid IS the FILE_OBJECT: one identity per kernel object, however many
+	// processes hold a handle — each holder is its own access event via owning_*.
+	if str(f1, "guid") != str(f2, "guid") || str(f1, "guid") != "file-f11e" {
+		t.Errorf("files guid must be the FILE_OBJECT alone (file-<hex>): %v vs %v", f1["guid"], f2["guid"])
+	}
+	if str(f1, "car_action") != "access" {
+		t.Errorf("a held handle is file/access, got %v", f1["car_action"])
+	}
+	if f1["owning_pid"] == f2["owning_pid"] {
+		t.Errorf("holders must stay distinct events: both owning_pid=%v", f1["owning_pid"])
 	}
 	if str(f1, "file_name") != "secret.docx" || i64(f1, "pid") != 10 {
 		t.Errorf("file_name=%v pid=%v", f1["file_name"], f1["pid"])

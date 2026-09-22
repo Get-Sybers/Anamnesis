@@ -50,10 +50,10 @@ idempotency contract). The native source is MemProcFS; the record shape is uncha
 | `windows.anamnesis.modules` | module / load | per-process module list (+ OwnerOffset) |
 | `windows.anamnesis.network` | flow / socket | net list (+ OwnerOffset) |
 | `windows.netstat` | flow / socket | net list (second view) |
-| `windows.anamnesis.files` | file (store-only) | per-process File handles (+ OwnerOffset) |
+| `windows.anamnesis.files` | file / access | per-process File handles (+ OwnerOffset); guid = the FILE_OBJECT |
 | `windows.anamnesis.access` | process / access | per-process Process handles (target = object EPROCESS) |
 | `windows.anamnesis.sessions` | user_session / login | process token LUID |
-| `windows.svcscan` | service (store-only) | service list |
+| `windows.svcscan` | service / enumerate | service list |
 | `windows.modules` | driver / load | kernel driver list |
 | `windows.filescan` | file (store-only) | forensic file scan |
 | `windows.mftscan.MFTScan` | file / create | forensic NTFS MFT |

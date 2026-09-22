@@ -195,6 +195,8 @@ func parseSource(node any) src {
 				return exePath(parseSource(val))
 			case "proc_guid":
 				return procGUID(parseSource(val))
+			case "file_guid":
+				return fileGUID(parseSource(val))
 			case "const":
 				return constS(val)
 			default:

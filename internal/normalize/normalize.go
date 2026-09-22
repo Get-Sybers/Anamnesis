@@ -190,6 +190,23 @@ func (p procGUIDSrc) resolve(rec car.Record) any {
 
 func procGUID(s src) src { return procGUIDSrc{s} }
 
+// fileGUIDSrc mints the FILE_OBJECT identity — "file-<hex>", the same
+// kernel-pointer convention as proc-<hex>.
+type fileGUIDSrc struct{ s src }
+
+func (p fileGUIDSrc) resolve(rec car.Record) any {
+	v := p.s.resolve(rec)
+	if v == nil {
+		return nil
+	}
+	if u, ok := value.Uint(v); ok {
+		return "file-" + strconv.FormatUint(u, 16)
+	}
+	return nil
+}
+
+func fileGUID(s src) src { return fileGUIDSrc{s} }
+
 // --- guid spec ---------------------------------------------------------------
 
 type guidKind int

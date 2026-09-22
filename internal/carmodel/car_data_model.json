@@ -26,9 +26,9 @@
                 "user_type"
             ],
             "actions": [
-                "error",
+                "success",
                 "failure",
-                "success"
+                "error"
             ]
         },
         {
@@ -50,6 +50,7 @@
             ],
             "actions": [
                 "load",
+                "metadata",
                 "unload"
             ]
         },
@@ -81,11 +82,11 @@
                 "to"
             ],
             "actions": [
-                "block",
-                "delete",
                 "deliver",
+                "block",
+                "redirect",
                 "quarantine",
-                "redirect"
+                "delete"
             ]
         },
         {
@@ -121,9 +122,12 @@
                 "user"
             ],
             "actions": [
+                "access",
                 "acl_modify",
+                "content",
                 "create",
                 "delete",
+                "metadata",
                 "modify",
                 "read",
                 "timestomp",
@@ -164,7 +168,10 @@
                 "user"
             ],
             "actions": [
+                "content",
+                "create",
                 "end",
+                "flow",
                 "message",
                 "start"
             ]
@@ -219,7 +226,9 @@
                 "tid"
             ],
             "actions": [
+                "content",
                 "load",
+                "metadata",
                 "unload"
             ]
         },
@@ -261,6 +270,9 @@
             "actions": [
                 "access",
                 "create",
+                "execute",
+                "metadata",
+                "modify",
                 "terminate"
             ]
         },
@@ -282,8 +294,12 @@
                 "value"
             ],
             "actions": [
+                "access",
                 "add",
+                "create",
+                "delete",
                 "key_edit",
+                "modify",
                 "remove",
                 "value_edit"
             ]
@@ -305,8 +321,12 @@
                 "user"
             ],
             "actions": [
+                "access",
                 "create",
                 "delete",
+                "enumerate",
+                "metadata",
+                "modify",
                 "pause",
                 "start",
                 "stop"
@@ -330,8 +350,8 @@
             ],
             "actions": [
                 "bind",
-                "close",
-                "listen"
+                "listen",
+                "close"
             ]
         },
         {
@@ -357,9 +377,9 @@
             ],
             "actions": [
                 "create",
-                "remote_create",
                 "suspend",
-                "terminate"
+                "terminate",
+                "remote_create"
             ]
         },
         {
@@ -379,10 +399,13 @@
                 "user"
             ],
             "actions": [
+                "create",
                 "lock",
                 "login",
                 "logout",
+                "metadata",
                 "reconnect",
+                "terminate",
                 "unlock"
             ]
         }

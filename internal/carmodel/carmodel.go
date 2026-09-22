@@ -1,8 +1,10 @@
-// Package carmodel is the MITRE CAR data model — the single source of truth for
-// which objects exist and which actions/properties each object has. It embeds the
-// vendored car_data_model.json (13 objects, regenerated from mitre-attack/car), so
-// the store's table schemas and the wide timeline's property superset both derive
-// from here: a model refresh is a data change, not a code change.
+// Package carmodel embeds the CAR data model this producer conforms to. The
+// model is OWNED by Byakugan (model/car/objects in the Byakugan repository —
+// the CAR + ATT&CK data-sources superset); the vendored car_data_model.json is
+// a copy of it, and a model refresh means re-aligning to Byakugan's published
+// objects/actions. The store's table schemas and the wide timeline's property
+// superset both derive from here: a model refresh is a data change, not a code
+// change.
 //
 // Faithful port of the original Python carmodel.py. Object order is preserved from the JSON
 // (insertion order in the Python dict) so table creation and CSV/timeline object
