@@ -82,8 +82,11 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		pi := &infos[i]
 		p := Process{
 			PID: pi.PID, PPID: pi.ParentPID, EPROCESS: pi.Win.EPROCESS, DTB: pi.DTB,
-			Name:           pi.Name(),
-			Path:           e.str(pi.PID, mp.ProcessInformationOptStringPathUserImage),
+			Name: pi.Name(),
+			// MemProcFS falls back to the bare image NAME for kernel-side
+			// processes (System, Registry); a value without a separator is not
+			// a path — image_path stays honestly null, the name lives in exe.
+			Path: pathOnly(e.str(pi.PID, mp.ProcessInformationOptStringPathUserImage)),
 			CommandLine:    e.str(pi.PID, mp.ProcessInformationOptStringCmdline),
 			SID:            e.str(pi.PID, mp.ProcessInformationOptStringSID),
 			SessionID:      int(pi.Win.SessionID),
@@ -128,6 +131,14 @@ func (e *vmmEngine) str(pid uint32, opt mp.ProcessInfoStringOptions) string {
 		return ""
 	}
 	return strings.TrimRight(s, "\x00")
+}
+
+// pathOnly keeps s only when it is path-shaped (carries a separator).
+func pathOnly(s string) string {
+	if strings.ContainsAny(s, `\/`) {
+		return s
+	}
+	return ""
 }
 
 // createTime reads _EPROCESS.CreateTime via its PDB offset + a kernel memory read.

@@ -152,19 +152,24 @@ mappings:
         exe: Owner
       keep: [State, Offset, Proto]
 
+  # A held File handle is ACCESS of the file object by the owning process
+  # (Byakugan's CAR model: file/access; same shape as the process/access rows).
+  # The guid is the FILE_OBJECT itself — one identity per kernel object; each
+  # holder is a separate access event carried by owning_*, and the handle facts
+  # (HandleValue, GrantedAccess) ride native for the relationship layer.
   windows.anamnesis.files:
     object: file
-    action: null
+    action: access
     ts: null
     owning_pid: PID
     owning_offset: OwnerOffset
-    guid: {fields: [FileObjectOffset, PID]}
+    guid: {marker: {file_guid: FileObjectOffset}}
     props:
       file_path: Path
       file_name: {basename: Path}
       extension: {ext: Path}
       pid: PID
-    keep: [HandleValue, GrantedAccess, FileObjectOffset, ProcessName]
+    keep: [HandleValue, GrantedAccess, FileObjectOffset, OwnerOffset, ProcessName]
 
   windows.anamnesis.sessions:
     object: user_session
@@ -288,9 +293,12 @@ mappings:
       user: {user_from_hive: Hive}
     keep: []
 
+  # A service enumerated from the SCM database snapshot is service/enumerate
+  # (Byakugan's CAR model) — the snapshot asserts the service's existence and
+  # recorded state, never a start/stop event.
   windows.svcscan:
     object: service
-    action: null
+    action: enumerate
     ts: null
     owning_pid: PID
     guid: {fields: [Offset]}

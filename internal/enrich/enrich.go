@@ -119,9 +119,12 @@ func keyPart(v any) string {
 	return "\x01" + value.Str(v)
 }
 
-// dedupe collapses exact (image, object, guid, action, target_guid, access_level)
-// duplicates — most-populated wins, first-seen order preserved. A nil guid never
-// collapses.
+// dedupe collapses exact (image, object, guid, action, owning_pid, target_guid,
+// access_level) duplicates — most-populated wins, first-seen order preserved.
+// The OWNER (by pid — one process per pid within a snapshot) is part of the
+// event identity: an object-keyed guid (a FILE_OBJECT) accessed by two
+// processes is two events, never one, while two collectors' views of the same
+// owner's event still collapse. A nil guid never collapses.
 func dedupe(events []car.Event) []car.Event {
 	best := map[string]car.Event{}
 	var order []string
@@ -129,7 +132,8 @@ func dedupe(events []car.Event) []car.Event {
 	for _, ev := range events {
 		k := strings.Join([]string{
 			keyPart(ev["source_image"]), keyPart(ev["car_object"]), keyPart(ev["guid"]),
-			keyPart(ev["car_action"]), keyPart(ev["target_guid"]), keyPart(ev["access_level"]),
+			keyPart(ev["car_action"]), keyPart(ev["owning_pid"]),
+			keyPart(ev["target_guid"]), keyPart(ev["access_level"]),
 		}, "\x1f")
 		if ev["guid"] == nil {
 			uniq++
