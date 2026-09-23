@@ -200,6 +200,7 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		if pi.Win.LUID != 0 {
 			p.LogonID = fmt.Sprintf("0x%x", pi.Win.LUID)
 		}
+		p.ExitTime = e.exitTimeISO(pi.Win.EPROCESS)
 		e.fillProcess(&p, pi)
 		if p.Path != "" {
 			pathByPID[pi.PID] = p.Path
@@ -210,8 +211,35 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	for i := range out {
 		out[i].ParentPath = pathByPID[out[i].PPID]
 	}
+	// The raw ActiveProcessLinks contrast, surfaced as is — the analyst sees
+	// every unlinked process; Hidden (ActivePIDs) is the consensus verdict.
+	if linked := e.linkedPIDs(); linked != nil {
+		for i := range out {
+			if out[i].PID != 0 && !linked[out[i].PID] {
+				out[i].Unlinked = true
+			}
+		}
+	}
 	e.procCache = out
 	return out, nil
+}
+
+// exitTimeISO reads _EPROCESS.ExitTime — adjacent to CreateTime on every
+// known x64 build — through the resolved CreateTime offset; "" while
+// running, unknown, or implausible.
+func (e *vmmEngine) exitTimeISO(eprocess uint64) string {
+	if !e.ctOK || eprocess == 0 {
+		return ""
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset)+8, 8)
+	if err != nil || len(b) < 8 {
+		return ""
+	}
+	ft := leU64(b)
+	if ft == 0 || (e.ctSource != "pdb" && !plausibleFileTime(ft)) {
+		return ""
+	}
+	return fileTimeToISO(ft)
 }
 
 // ActivePIDs reports each detected PID's presence on the kernel's
