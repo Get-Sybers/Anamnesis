@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -24,14 +25,114 @@ type StoreKey struct {
 
 // StoreEntry is the persisted form: the key restated (so a file is
 // self-describing and a mismatched or renamed file is detected), the offsets,
-// how they were obtained, and when.
+// the accessors found permanently undecodable for this build, how they were
+// obtained, and when. Undecodable lets a hit know a partial entry is as
+// complete as the build allows, so an image that could only read part of the
+// kernel does not force every later image to re-attempt the rest — the store
+// converges (docs/design/symbol-recovery.md §2).
 type StoreEntry struct {
-	Module  string            `json:"module"`
-	GUID    string            `json:"guid"`
-	Age     uint32            `json:"age"`
-	Offsets []RecoveredOffset `json:"offsets"`
-	Source  string            `json:"source"`  // "accessor" today; other tiers later
-	Created string            `json:"created"` // RFC3339 UTC
+	Module      string            `json:"module"`
+	GUID        string            `json:"guid"`
+	Age         uint32            `json:"age"`
+	Offsets     []RecoveredOffset `json:"offsets"`
+	Undecodable []string          `json:"undecodable,omitempty"` // accessor funcs whose shape carries no offset — permanent for this build
+	Source      string            `json:"source"`                // "accessor" today; other tiers later
+	Created     string            `json:"created"`               // RFC3339 UTC, first write
+	Updated     string            `json:"updated,omitempty"`     // RFC3339 UTC, last convergence write
+}
+
+// Offset returns the recovered offset for an accessor func.
+func (e *StoreEntry) Offset(fn string) (int32, bool) {
+	for _, o := range e.Offsets {
+		if o.Func == fn {
+			return o.Offset, true
+		}
+	}
+	return 0, false
+}
+
+// Complete reports whether every accessor is accounted for — each either
+// recovered or known permanently undecodable — so no later image can add to
+// this entry and recovery can be skipped on a hit.
+func (e *StoreEntry) Complete(accessors []Accessor) bool {
+	covered := make(map[string]bool, len(e.Offsets)+len(e.Undecodable))
+	for _, o := range e.Offsets {
+		covered[o.Func] = true
+	}
+	for _, u := range e.Undecodable {
+		covered[u] = true
+	}
+	for _, a := range accessors {
+		if !covered[a.Func] {
+			return false
+		}
+	}
+	return true
+}
+
+// Merge folds a fresh recovery — the offsets read this run and the funcs found
+// permanently undecodable — into base, returning the converged entry and
+// whether it improved on base (a new offset or a newly-known-undecodable
+// func). base wins every offset conflict: a hand-seeded or already-persisted
+// value stays authoritative (a wrong one is caught downstream by the
+// consume-time plausibility gate), and a fresh recovery only fills gaps.
+// base may be nil for a first recovery. Offsets are ordered by func so the
+// file is stable across writes.
+func Merge(base *StoreEntry, key StoreKey, offsets []RecoveredOffset, undecodable []string, now string) (*StoreEntry, bool) {
+	byFunc := map[string]RecoveredOffset{}
+	created, source := now, "accessor"
+	if base != nil {
+		created, source = base.Created, base.Source
+		for _, o := range base.Offsets {
+			byFunc[o.Func] = o
+		}
+	}
+	improved := base == nil
+	for _, o := range offsets {
+		if _, ok := byFunc[o.Func]; !ok {
+			byFunc[o.Func] = o
+			improved = true
+		}
+	}
+	undec := map[string]bool{}
+	if base != nil {
+		for _, u := range base.Undecodable {
+			undec[u] = true
+		}
+	}
+	for _, u := range undecodable {
+		if !undec[u] {
+			undec[u] = true
+			improved = true
+		}
+	}
+	out := &StoreEntry{
+		Module: key.Module, GUID: key.GUID, Age: key.Age,
+		Offsets: sortedOffsets(byFunc), Undecodable: sortedKeys(undec),
+		Source: source, Created: created, Updated: now,
+	}
+	return out, improved
+}
+
+func sortedOffsets(m map[string]RecoveredOffset) []RecoveredOffset {
+	out := make([]RecoveredOffset, 0, len(m))
+	for _, o := range m {
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Func < out[j].Func })
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // StoreSubdir is the directory the store lives in, under the symbol cache.

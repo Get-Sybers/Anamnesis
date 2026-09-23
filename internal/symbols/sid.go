@@ -21,7 +21,9 @@ func DecodeSID(raw []byte) (string, bool) {
 	return sidFromBinary(raw)
 }
 
-// sidFromASCII accepts a NUL-terminated "S-1-…" string of digits and dashes.
+// sidFromASCII accepts an "S-1-…" string of digits and dashes. A NUL, if
+// present, ends it; the buffer need not be terminated (a fixed-size field may
+// carry the string flush to its end).
 func sidFromASCII(raw []byte) (string, bool) {
 	if len(raw) < 4 || raw[0] != 'S' || raw[1] != '-' || raw[2] != '1' || raw[3] != '-' {
 		return "", false

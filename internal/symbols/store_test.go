@@ -3,8 +3,98 @@ package symbols
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func battery() []Accessor {
+	return []Accessor{
+		{Func: "PsGetProcessId"},
+		{Func: "PsGetProcessCreateTimeQuadPart"},
+		{Func: "PsIsProtectedProcess"},
+	}
+}
+
+func TestMergeFirstRecovery(t *testing.T) {
+	offs := []RecoveredOffset{{Func: "PsGetProcessId", Offset: 0x440, Confidence: Definitive}}
+	got, improved := Merge(nil, StoreKey{"ntoskrnl.exe", "G", 1}, offs, []string{"PsIsProtectedProcess"}, "2026-09-23T00:00:00Z")
+	if !improved {
+		t.Fatal("a first recovery must count as improved")
+	}
+	if got.Source != "accessor" || got.Created != "2026-09-23T00:00:00Z" || got.Updated != "2026-09-23T00:00:00Z" {
+		t.Fatalf("bad provenance: %+v", got)
+	}
+	if len(got.Offsets) != 1 || len(got.Undecodable) != 1 {
+		t.Fatalf("merge shape: %+v", got)
+	}
+}
+
+func TestMergeConvergesPartialToComplete(t *testing.T) {
+	// A first image read only PsGetProcessId and found PsIsProtectedProcess
+	// undecodable; CreateTime's page was not resident (neither offset nor
+	// undecodable) — the entry is incomplete.
+	base := &StoreEntry{
+		Module: "ntoskrnl.exe", GUID: "G", Age: 1,
+		Offsets:     []RecoveredOffset{{Func: "PsGetProcessId", Offset: 0x440, Confidence: Definitive}},
+		Undecodable: []string{"PsIsProtectedProcess"},
+		Source:      "accessor", Created: "2026-09-23T00:00:00Z", Updated: "2026-09-23T00:00:00Z",
+	}
+	if base.Complete(battery()) {
+		t.Fatal("base must be incomplete (CreateTime missing)")
+	}
+	// A later, fuller image reads CreateTime too.
+	fresh := []RecoveredOffset{
+		{Func: "PsGetProcessId", Offset: 0x440, Confidence: Definitive},
+		{Func: "PsGetProcessCreateTimeQuadPart", Offset: 0x468, Confidence: Definitive},
+	}
+	got, improved := Merge(base, StoreKey{"ntoskrnl.exe", "G", 1}, fresh, nil, "2026-09-24T00:00:00Z")
+	if !improved {
+		t.Fatal("adding CreateTime must improve the entry")
+	}
+	if !got.Complete(battery()) {
+		t.Fatalf("merged entry must now be complete: %+v", got)
+	}
+	if got.Created != "2026-09-23T00:00:00Z" || got.Updated != "2026-09-24T00:00:00Z" {
+		t.Fatalf("Created must be preserved and Updated advanced: %+v", got)
+	}
+	if _, ok := got.Offset("PsGetProcessCreateTimeQuadPart"); !ok {
+		t.Fatal("CreateTime offset must be present after convergence")
+	}
+}
+
+func TestMergeNoImprovementOnComplete(t *testing.T) {
+	base := &StoreEntry{
+		Module: "ntoskrnl.exe", GUID: "G", Age: 1,
+		Offsets: []RecoveredOffset{
+			{Func: "PsGetProcessId", Offset: 0x440},
+			{Func: "PsGetProcessCreateTimeQuadPart", Offset: 0x468},
+		},
+		Undecodable: []string{"PsIsProtectedProcess"},
+		Created:     "2026-09-23T00:00:00Z",
+	}
+	if !base.Complete(battery()) {
+		t.Fatal("base should be complete")
+	}
+	_, improved := Merge(base, StoreKey{"ntoskrnl.exe", "G", 1},
+		[]RecoveredOffset{{Func: "PsGetProcessId", Offset: 0x440}}, nil, "2026-09-25T00:00:00Z")
+	if improved {
+		t.Fatal("re-recovering offsets already stored must not count as improvement")
+	}
+}
+
+func TestMergeBaseWinsConflict(t *testing.T) {
+	base := &StoreEntry{
+		Module: "ntoskrnl.exe", GUID: "G", Age: 1,
+		Offsets: []RecoveredOffset{{Func: "PsGetProcessId", Offset: 0x440}},
+		Created: "2026-09-23T00:00:00Z",
+	}
+	// A fresh read disagrees (a corrupt page): base's value stays authoritative.
+	got, _ := Merge(base, StoreKey{"ntoskrnl.exe", "G", 1},
+		[]RecoveredOffset{{Func: "PsGetProcessId", Offset: 0x999}}, nil, "2026-09-24T00:00:00Z")
+	if o, _ := got.Offset("PsGetProcessId"); o != 0x440 {
+		t.Fatalf("base must win an offset conflict, got %#x", o)
+	}
+}
 
 func testEntry() StoreEntry {
 	return StoreEntry{
@@ -33,9 +123,9 @@ func TestStoreRoundTrip(t *testing.T) {
 	if len(got.Offsets) != 1 || got.Offsets[0].Offset != 0x468 || got.Source != "accessor" {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
-	// Key lookups are case-insensitive on module and GUID.
-	if _, err := ReadStoredOffsets(dir, StoreKey{"NTOSKRNL.EXE", e.GUID, e.Age}); err == nil {
-		t.Log("upper-case module resolved (file name is lower-cased)")
+	// Key lookups fold case on both module and GUID.
+	if _, err := ReadStoredOffsets(dir, StoreKey{"NTOSKRNL.EXE", strings.ToLower(e.GUID), e.Age}); err != nil {
+		t.Fatalf("case-insensitive key lookup must resolve the entry: %v", err)
 	}
 }
 

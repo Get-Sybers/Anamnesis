@@ -90,48 +90,77 @@ func (e *vmmEngine) recoverPrePass() {
 		return
 	}
 	key := symbols.StoreKey{Module: "ntoskrnl.exe", GUID: guid, Age: age}
-	var entry *symbols.StoreEntry
-	source := "store"
+	total := len(symbols.ProcessAccessors)
+
+	var stored *symbols.StoreEntry
 	for _, dir := range e.storeDirs() {
 		if en, rerr := symbols.ReadStoredOffsets(dir, key); rerr == nil {
-			entry = en
-			fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit (%s guid=%s age=%d) in %s\n",
-				key.Module, key.GUID, key.Age, dir)
+			stored = en
 			break
 		}
 	}
-	if entry == nil {
-		offsets, diags := symbols.RecoverOffsets(kernelCode{e.vmm}, symbols.ProcessAccessors)
-		fmt.Fprintf(os.Stderr, "[anamnesis] recovered %d kernel offsets from in-memory ntoskrnl (guid=%s age=%d; %d accessors undecodable)\n",
-			len(offsets), key.GUID, key.Age, len(diags))
-		if len(offsets) == 0 {
-			return
-		}
-		en := symbols.StoreEntry{
-			Module: key.Module, GUID: key.GUID, Age: key.Age,
-			Offsets: offsets, Source: "accessor",
-			Created: time.Now().UTC().Format(time.RFC3339),
-		}
-		entry, source = &en, "accessor"
-		if dir := e.writableStoreDir(); dir != "" {
-			if werr := symbols.WriteStoredOffsets(dir, en); werr != nil {
-				fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
-			}
+
+	// A complete stored entry (every accessor recovered or known undecodable)
+	// is trusted as is — the fast path, no re-recovery. Otherwise disassemble
+	// the in-memory ntoskrnl and MERGE into the stored entry, so an image that
+	// could read only part of the kernel completes the entry a fuller image
+	// left behind (the store converges over time — §2).
+	// A CreateTime offset already in the stored entry is provenance "store";
+	// one this image contributes is "accessor" — decided before the merge.
+	const ctFunc = "PsGetProcessCreateTimeQuadPart"
+	ctWhence := "accessor"
+	if stored != nil {
+		if _, ok := stored.Offset(ctFunc); ok {
+			ctWhence = "store"
 		}
 	}
-	for _, o := range entry.Offsets {
-		if o.Func != "PsGetProcessCreateTimeQuadPart" || o.Offset <= 0 {
-			continue
+
+	entry := stored
+	if stored == nil || !stored.Complete(symbols.ProcessAccessors) {
+		offsets, diags := symbols.RecoverOffsets(kernelCode{e.vmm}, symbols.ProcessAccessors)
+		var undecodable []string
+		for _, d := range diags {
+			if d.Kind == symbols.Unrecognised {
+				undecodable = append(undecodable, d.Func)
+			}
 		}
+		merged, improved := symbols.Merge(stored, key, offsets, undecodable, time.Now().UTC().Format(time.RFC3339))
+		entry = merged
+		switch {
+		case stored == nil:
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %d/%d kernel offsets from in-memory ntoskrnl (guid=%s age=%d)\n",
+				len(entry.Offsets), total, key.GUID, key.Age)
+		case improved:
+			fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit but incomplete — converged to %d/%d offsets from this image (guid=%s age=%d)\n",
+				len(entry.Offsets), total, key.GUID, key.Age)
+		default:
+			fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit, %d/%d offsets (this image adds none more; guid=%s age=%d)\n",
+				len(entry.Offsets), total, key.GUID, key.Age)
+		}
+		if entry == nil || len(entry.Offsets) == 0 {
+			return
+		}
+		if improved {
+			if dir := e.writableStoreDir(); dir != "" {
+				if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
+					fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
+				}
+			}
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit (complete, %d/%d offsets) guid=%s age=%d\n",
+			len(entry.Offsets), total, key.GUID, key.Age)
+	}
+
+	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
 		// Gate on EVERY load, store hits included: the offset must decode the
 		// System process's CreateTime to a plausible FILETIME, so a wrong or
 		// poisoned store entry self-quarantines instead of stamping garbage.
-		if e.plausibleSystemCreateTime(uint32(o.Offset)) {
-			e.recCTOffset, e.recCTOK, e.recSource = uint32(o.Offset), true, source
+		if e.plausibleSystemCreateTime(uint32(off)) {
+			e.recCTOffset, e.recCTOK, e.recSource = uint32(off), true, ctWhence
 		} else {
-			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", o.Offset)
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", off)
 		}
-		break
 	}
 }
 
@@ -219,11 +248,16 @@ func (e *vmmEngine) storeDirs() []string {
 	}
 }
 
-// writableStoreDir picks the first store location whose parent accepts writes
-// (the same probe stageSymbols uses); "" when neither does.
+// writableStoreDir picks the first store location that can actually be
+// created and written — the store directory itself, not its parent, so a
+// read-only Symbols mount (where the parent exists but the subdir cannot be
+// made) correctly falls through to the /tmp store. "" when neither works.
 func (e *vmmEngine) writableStoreDir() string {
 	for _, dir := range e.storeDirs() {
-		probe, err := os.CreateTemp(filepath.Dir(dir), ".anamnesis-probe-*")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			continue
+		}
+		probe, err := os.CreateTemp(dir, ".anamnesis-probe-*")
 		if err != nil {
 			continue
 		}
