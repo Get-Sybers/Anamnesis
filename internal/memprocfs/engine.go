@@ -183,14 +183,15 @@ func ProcGUID(eprocess uint64) string {
 }
 
 // OpenOptions configures how the native engine opens a memory image.
+//
+// There is no symbol option: the engine is always offline. PDB symbols are a
+// baked dependency of the container image (a pre-populated Symbols/ cache
+// beside vmm.so, seeded at image build time); the engine only ever reads that
+// cache, never the network.
 type OpenOptions struct {
 	// LibPath is the MemProcFS vmm shared library (vmm.so). Empty uses the
 	// implementation default (env ANAMNESIS_VMM_LIB, else a baked-in path).
 	LibPath string
-	// SymbolsDir is the PDB/symbol cache directory.
-	SymbolsDir string
-	// SymbolsOnline allows the engine to fetch PDB symbols over the network.
-	SymbolsOnline bool
 	// Forensic enables MemProcFS forensic mode. Nothing consumes it yet (the
 	// MFT / file-scan / malfind collectors are on-target stubs), and its
 	// background plugin init deadlocks vmm.so 5.18 — an ObjFile↔Registry lock

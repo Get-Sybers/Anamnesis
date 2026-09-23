@@ -42,8 +42,8 @@ func run(argv []string) int {
 
 func runSingle(argv []string) int {
 	fs := flag.NewFlagSet("anamnesis", flag.ContinueOnError)
-	var memory, out, format, plugins, symbols, lib string
-	var noTimeline, symbolsOnline, listPlugins, showVersion bool
+	var memory, out, format, plugins, lib string
+	var noTimeline, listPlugins, showVersion bool
 	// -f/--memory and -o/--out both bind the same var (short + long).
 	fs.StringVar(&memory, "f", "", "memory image (raw/lime/dmp/vmem/...)")
 	fs.StringVar(&memory, "memory", "", "memory image (raw/lime/dmp/vmem/...)")
@@ -51,10 +51,8 @@ func runSingle(argv []string) int {
 	fs.StringVar(&out, "out", "", "output directory")
 	fs.StringVar(&format, "format", "json", "output: json (wide CAR timeline) | csv (one CSV per CAR object)")
 	fs.StringVar(&plugins, "plugins", "", "comma-separated collector override (else the default set)")
-	fs.StringVar(&symbols, "symbols", "", "PDB/symbol cache dir (default: a temp dir)")
 	fs.StringVar(&lib, "lib", "", "path to the MemProcFS vmm library (else ANAMNESIS_VMM_LIB / baked default)")
 	fs.BoolVar(&noTimeline, "no-timeline", false, "skip rendered outputs; still write plugins/*.jsonl and car.db")
-	fs.BoolVar(&symbolsOnline, "symbols-online", false, "allow the engine to fetch PDB symbols (network)")
 	fs.BoolVar(&listPlugins, "list-plugins", false, "print the default collector set as JSON and exit")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	if err := fs.Parse(argv); err != nil {
@@ -79,10 +77,6 @@ func runSingle(argv []string) int {
 		return 2
 	}
 	os.MkdirAll(out, 0o755)
-	if symbols == "" {
-		symbols, _ = os.MkdirTemp("", "anamnesis-symbols-")
-	}
-	os.MkdirAll(symbols, 0o755)
 
 	names := collect.Names()
 	if plugins != "" {
@@ -90,11 +84,7 @@ func runSingle(argv []string) int {
 	}
 
 	fmt.Fprintf(os.Stderr, "anamnesis %s: %s -> %s (%s)\n", version, memory, out, format)
-	eng, err := memprocfs.Open(memory, memprocfs.OpenOptions{
-		LibPath:       libPath(lib),
-		SymbolsDir:    symbols,
-		SymbolsOnline: symbolsOnline,
-	})
+	eng, err := memprocfs.Open(memory, memprocfs.OpenOptions{LibPath: libPath(lib)})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
