@@ -1,0 +1,233 @@
+//go:build memprocfs
+
+// Offline recovery (docs/design/symbol-recovery.md §5, §6, §2 Tier 1): with no
+// PDB, the engine recovers the symbol-derived process fields from the image
+// itself — the command line out of the PEB's ProcessParameters anchored on the
+// image path, the SID out of the ProcessInfo buffer, the user out of the
+// registry-derived SID table, and _EPROCESS.CreateTime by disassembling the
+// in-memory ntoskrnl's own accessor export. Kernel offsets are cached in the
+// Tier-1 offset store keyed by the build's CodeView (GUID, age), kept in the
+// persistent symbol cache, so the second image of a build is a store hit.
+// Everything is per-field best-effort: a failed recovery costs that field and
+// never the collector.
+package memprocfs
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	mp "github.com/sergeyzav/gomemprocfs"
+
+	"anamnesis/internal/symbols"
+)
+
+// systemPID is the Windows System process — the kernel address space vmm
+// resolves module exports and reads kernel memory through.
+const systemPID = 4
+
+// vmmReader adapts one process's virtual address space to symbols.MemReader.
+type vmmReader struct {
+	v   *mp.Vmm
+	pid uint32
+}
+
+func (r vmmReader) ReadVirtual(va uint64, n uint32) ([]byte, bool) {
+	b, cb, err := r.v.MemReadEx(r.pid, va, n, mp.MemFlagNone)
+	if err != nil || cb == 0 {
+		return nil, false
+	}
+	if uint32(len(b)) > cb {
+		b = b[:cb]
+	}
+	return b, true
+}
+
+// kernelCode feeds symbols.RecoverOffsets the leading bytes of exported
+// ntoskrnl routines, resolved through vmm's own in-memory export-table parse —
+// no PDB involved.
+type kernelCode struct {
+	v *mp.Vmm
+}
+
+func (k kernelCode) FunctionCode(name string) ([]byte, uint64, error) {
+	va, err := k.v.GetProcAddress(systemPID, "ntoskrnl.exe", name)
+	if err != nil {
+		return nil, 0, fmt.Errorf("resolve %s: %w", name, err)
+	}
+	if va == 0 {
+		return nil, 0, fmt.Errorf("resolve %s: export not found", name)
+	}
+	code, err := k.v.MemRead(systemPID, va, 64)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read %s at %#x: %w", name, va, err)
+	}
+	return code, va, nil
+}
+
+// recoverPrePass runs once per image before the process list is built: the
+// SID→user table, the kernel build identity, and the offset-store lookup —
+// on a miss the accessor battery is disassembled and the result written back
+// (the self-teaching cache).
+func (e *vmmEngine) recoverPrePass() {
+	if e.recTried {
+		return
+	}
+	e.recTried = true
+	if ul, err := e.vmm.GetUserList(); err == nil && ul != nil {
+		e.userBySID = make(map[string]string, len(ul.Entries))
+		for _, u := range ul.Entries {
+			if u.SID != "" && u.Text != "" {
+				e.userBySID[u.SID] = u.Text
+			}
+		}
+	}
+	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlagDebugInfo)
+	if err != nil || mod == nil || mod.DebugInfo == nil || mod.DebugInfo.GuidString == "" {
+		fmt.Fprintln(os.Stderr, "[anamnesis] offline recovery: no ntoskrnl CodeView identity — kernel-offset recovery skipped")
+		return
+	}
+	key := symbols.StoreKey{Module: "ntoskrnl.exe", GUID: mod.DebugInfo.GuidString, Age: mod.DebugInfo.Age}
+	var entry *symbols.StoreEntry
+	source := "store"
+	for _, dir := range e.storeDirs() {
+		if en, rerr := symbols.ReadStoredOffsets(dir, key); rerr == nil {
+			entry = en
+			fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit (%s guid=%s age=%d) in %s\n",
+				key.Module, key.GUID, key.Age, dir)
+			break
+		}
+	}
+	if entry == nil {
+		offsets, diags := symbols.RecoverOffsets(kernelCode{e.vmm}, symbols.ProcessAccessors)
+		fmt.Fprintf(os.Stderr, "[anamnesis] recovered %d kernel offsets from in-memory ntoskrnl (guid=%s age=%d; %d accessors undecodable)\n",
+			len(offsets), key.GUID, key.Age, len(diags))
+		if len(offsets) == 0 {
+			return
+		}
+		en := symbols.StoreEntry{
+			Module: key.Module, GUID: key.GUID, Age: key.Age,
+			Offsets: offsets, Source: "accessor",
+			Created: time.Now().UTC().Format(time.RFC3339),
+		}
+		entry, source = &en, "accessor"
+		if dir := e.writableStoreDir(); dir != "" {
+			if werr := symbols.WriteStoredOffsets(dir, en); werr != nil {
+				fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
+			}
+		}
+	}
+	for _, o := range entry.Offsets {
+		if o.Func != "PsGetProcessCreateTimeQuadPart" || o.Offset <= 0 {
+			continue
+		}
+		// Gate on EVERY load, store hits included: the offset must decode the
+		// System process's CreateTime to a plausible FILETIME, so a wrong or
+		// poisoned store entry self-quarantines instead of stamping garbage.
+		if e.plausibleSystemCreateTime(uint32(o.Offset)) {
+			e.recCTOffset, e.recCTOK, e.recSource = uint32(o.Offset), true, source
+		} else {
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", o.Offset)
+		}
+		break
+	}
+}
+
+// fillProcess back-fills the fields the PDB-gated reads left empty, per
+// process, tagging each recovered value in Recovery as field=method.
+func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
+	var rec []string
+	if p.CommandLine == "" {
+		r := vmmReader{e.vmm, pi.PID}
+		var res symbols.CommandLineResult
+		var ok bool
+		if pi.Win.PEB != 0 {
+			res, ok = symbols.RecoverCommandLine(r, pi.Win.PEB, p.Path)
+		} else if pi.Win.PEB32 != 0 {
+			res, ok = symbols.RecoverCommandLine32(r, pi.Win.PEB32, p.Path)
+		}
+		if ok {
+			if res.CommandLine != "" {
+				p.CommandLine = res.CommandLine
+				rec = append(rec, "command_line="+res.Method)
+			}
+			if p.Path == "" {
+				if ip := pathOnly(res.ImagePath); ip != "" {
+					p.Path = ip
+					rec = append(rec, "image_path="+res.Method)
+				}
+			}
+		}
+	}
+	if p.SID == "" {
+		if s, ok := symbols.DecodeSID(pi.Win.SIDRaw[:]); ok {
+			p.SID = s
+			rec = append(rec, "sid=sidraw")
+		}
+	}
+	// Exact SID→account match from the registry-derived table; well-known SIDs
+	// are left for the enrich stage's own map.
+	if p.User == "" && p.SID != "" {
+		if u := e.userBySID[p.SID]; u != "" {
+			p.User = u
+			rec = append(rec, "user=userlist")
+		}
+	}
+	if p.CreateTime != "" && e.ctSource != "" && e.ctSource != "pdb" {
+		rec = append(rec, "create_time="+e.ctSource)
+	}
+	if len(rec) > 0 {
+		p.Recovery = strings.Join(rec, ";")
+	}
+}
+
+// storeDirs lists where offset-store entries may live: the persistent symbol
+// cache beside vmm.so (when mounted read-write) and the /tmp fallback.
+func (e *vmmEngine) storeDirs() []string {
+	return []string{
+		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.StoreSubdir),
+		filepath.Join("/tmp", symbols.StoreSubdir),
+	}
+}
+
+// writableStoreDir picks the first store location whose parent accepts writes
+// (the same probe stageSymbols uses); "" when neither does.
+func (e *vmmEngine) writableStoreDir() string {
+	for _, dir := range e.storeDirs() {
+		probe, err := os.CreateTemp(filepath.Dir(dir), ".anamnesis-probe-*")
+		if err != nil {
+			continue
+		}
+		probe.Close()
+		os.Remove(probe.Name())
+		return dir
+	}
+	return ""
+}
+
+// plausibleSystemCreateTime reads the System process's CreateTime through the
+// candidate offset and demands a FILETIME between 1990 and a day from now.
+func (e *vmmEngine) plausibleSystemCreateTime(off uint32) bool {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return false
+	}
+	b, err := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(off), 8)
+	if err != nil || len(b) < 8 {
+		return false
+	}
+	return plausibleFileTime(leU64(b))
+}
+
+// fileTimeFloor is 1990-01-01 as a FILETIME (100ns ticks since 1601-01-01).
+var fileTimeFloor = uint64(time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC).Unix()+11644473600) * 10_000_000
+
+func plausibleFileTime(ft uint64) bool {
+	if ft < fileTimeFloor {
+		return false
+	}
+	ceiling := uint64(time.Now().Add(24*time.Hour).Unix()+11644473600) * 10_000_000
+	return ft <= ceiling
+}
