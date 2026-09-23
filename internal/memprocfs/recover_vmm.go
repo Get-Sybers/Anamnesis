@@ -183,7 +183,7 @@ func (e *vmmEngine) recoverPrePass() {
 	if off, ok := entry.Offset("PsGetProcessId"); ok && off > 0 && e.systemQwordAt(uint32(off)) == uint64(systemPID) {
 		e.recPIDOffset, e.recPIDOK = uint32(off), true
 	}
-	if off, ok := entry.Offset("PsGetProcessExitStatus"); ok && off > 0 && uint32(e.systemQwordAt(uint32(off))) == stillActiveStatus {
+	if off, ok := entry.Offset("PsGetProcessExitStatus"); ok && off > 0 && e.systemDwordAt(uint32(off)) == stillActiveStatus {
 		e.recExitOffset, e.recExitOK = uint32(off), true
 	}
 	// ActiveProcessLinks directly follows UniqueProcessId on every known x64
@@ -238,7 +238,10 @@ const tokenScanFunc = "TokenScan"
 // process, tagging each recovered value in Recovery as field=method.
 func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 	var rec []string
-	if p.CommandLine == "" {
+	// The parameter block also carries cwd and the environment, which the
+	// PDB-backed reads never fill — so the walk runs whenever ANY of the
+	// three is missing, and each value only ever fills a blank.
+	if p.CommandLine == "" || p.Cwd == "" || p.EnvVars == "" {
 		r := vmmReader{e.vmm, pi.PID}
 		var res symbols.ProcParamsResult
 		var ok bool
@@ -248,7 +251,7 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 			res, ok = symbols.RecoverProcParams32(r, pi.Win.PEB32, p.Path)
 		}
 		if ok {
-			if res.CommandLine != "" {
+			if p.CommandLine == "" && res.CommandLine != "" {
 				p.CommandLine = res.CommandLine
 				rec = append(rec, "command_line="+res.Method)
 			}
@@ -403,6 +406,20 @@ func (e *vmmEngine) systemQwordAt(off uint32) uint64 {
 		return 0
 	}
 	return leU64(b)
+}
+
+// systemDwordAt reads one dword the same way — sized to the field, so a
+// 4-byte NTSTATUS at a page edge is not lost to a wider read failing.
+func (e *vmmEngine) systemDwordAt(off uint32) uint32 {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return 0
+	}
+	b, err := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(off), 4)
+	if err != nil || len(b) < 4 {
+		return 0
+	}
+	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
 // linksClosureHolds verifies the LIST_ENTRY at System's _EPROCESS+off closes
