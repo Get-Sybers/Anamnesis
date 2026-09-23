@@ -44,13 +44,26 @@ LeechCore `file://` device; no kernel driver, no live target.
 ### 1.1 Symbols
 
 MemProcFS resolves kernel/type offsets from its bundled `info.db` and, for full
-fidelity, PDBs from the Microsoft Symbol Server on first use (the analogue of
-Volatility's ISF fetch). anamnesis keeps an offline-first posture:
-default `--network none`, pre-seed a symbol/PDB cache; `--symbols-online`
-(`ANAMNESIS_SYMBOLS_ONLINE`) is the knob that documents a run given network for the
-fetch. Much of the process/handle/module/network surface resolves from `info.db`
-alone (offline); PDBs mainly sharpen symbol-name resolution (e.g. thread start
-function).
+fidelity, from PDBs matched to the image's exact binary revisions (GUID+age —
+the analogue of Volatility's ISF fetch). `info.db` alone covers the kernel
+`_EPROCESS`-derived surface; the PEB command line, the token SID/user and
+symbol-name resolution need the PDBs, which on Linux go through the
+`libpdbcrust.so` wrapper shipped in the MemProcFS release.
+
+anamnesis is **always offline** — there is no runtime symbol variable, mount or
+network. PDB symbols are a baked dependency of the container image: the
+GoDFIR-toolz build seeds `Symbols/` beside `vmm.so` (running the engine over
+representative images in a networked, writable build stage) and ships it
+read-only. Two MemProcFS behaviors shape the engine side:
+
+- On Linux the local cache is `<dir(vmm.so)>/Symbols` **only when writable**;
+  otherwise MemProcFS silently uses the literal `/tmp`
+  (`pdb.c PDB_Initialize_InitialValues`). Under the hardened read-only rootfs
+  the engine therefore stages the baked cache into `/tmp` at open
+  (`stageSymbols`), preserving the symsrv layout `<name>/<GUID+age>/<name>`.
+- `-disable-symbolserver` is passed unconditionally; actual offline-ness at
+  runtime is guaranteed by the container's `--network none` (the Linux
+  pdbcrust path does not consult the server-disable flag).
 
 ## 2. Architecture
 

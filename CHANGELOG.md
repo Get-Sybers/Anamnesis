@@ -7,6 +7,17 @@ All notable changes are documented here, following
 ## [Unreleased]
 
 ### Changed
+- **Breaking: the engine is always offline — the runtime symbol options are
+  gone.** The `--symbols` / `--symbols-online` flags, the
+  `ANAMNESIS_SYMBOLS_DIR` / `ANAMNESIS_SYMBOLS_ONLINE` env variables and the
+  `symbols_dir` / `symbols_online` batch-summary keys are removed;
+  `OpenOptions` loses `SymbolsDir` / `SymbolsOnline` (the former was read
+  nowhere). PDB symbols are a baked dependency of the container image now: the
+  GoDFIR-toolz build seeds a `Symbols/` cache beside `vmm.so` at build time,
+  and at open the engine stages that cache into `/tmp` when it is read-only —
+  mirroring MemProcFS's own Linux fallback (an unwritable `<lib>/Symbols` is
+  silently swapped for `/tmp`, so a read-only baked cache would otherwise
+  never be read). `-disable-symbolserver` is now passed unconditionally.
 - Batch input contract normalized to the family standard: the batch orchestrator
   now reads `ANAMNESIS_INPUT_DIR` (default `/input`) for image discovery. During
   transition, `ANAMNESIS_MEMORY_DIR` is still accepted as a fallback (with a

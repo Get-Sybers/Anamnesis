@@ -21,12 +21,13 @@ import (
 //
 //	ANAMNESIS_INPUT_DIR      memory image tree, recursed        (default /input)
 //	ANAMNESIS_OUT_DIR        output root, one folder per image  (default /out)
-//	ANAMNESIS_SYMBOLS_DIR    PDB/symbol cache (read-write)      (default /symbols)
 //	ANAMNESIS_PLUGINS        comma-separated collectors; empty = the default CAR set
 //	ANAMNESIS_FORCE          1/true/yes/on: rerun collectors with valid output
-//	ANAMNESIS_SYMBOLS_ONLINE 1/true/yes/on: this container has network for PDB fetch
 //	ANAMNESIS_VMM_LIB        path to the MemProcFS vmm library
 //	ANAMNESIS_STALL_TIMEOUT  per-collector stall watchdog, a Go duration (default 5m; 0 disables)
+//
+// There is no symbol variable: the engine is always offline, reading only the
+// image's baked PDB cache (Symbols/ beside vmm.so, seeded at image build).
 //
 // A collector blocked inside the native engine past ANAMNESIS_STALL_TIMEOUT is a
 // stall: the call cannot be cancelled and the engine's native locks must be
@@ -53,20 +54,18 @@ type perImage struct {
 }
 
 type summary struct {
-	Tool          string     `json:"tool"`
-	InputDir      string     `json:"input_dir"`
-	OutDir        string     `json:"out_dir"`
-	SymbolsDir    string     `json:"symbols_dir"`
-	SymbolsOnline bool       `json:"symbols_online"`
-	Force         bool       `json:"force"`
-	Images        int        `json:"images"`
-	Plugins       int        `json:"plugins"`
-	Processed     int        `json:"processed"`
-	Skipped       int        `json:"skipped"`
-	Failed        int        `json:"failed"`
-	Results       []perImage `json:"results"`
-	Diagnostics   string     `json:"diagnostics,omitempty"`
-	Error         string     `json:"error,omitempty"`
+	Tool        string     `json:"tool"`
+	InputDir    string     `json:"input_dir"`
+	OutDir      string     `json:"out_dir"`
+	Force       bool       `json:"force"`
+	Images      int        `json:"images"`
+	Plugins     int        `json:"plugins"`
+	Processed   int        `json:"processed"`
+	Skipped     int        `json:"skipped"`
+	Failed      int        `json:"failed"`
+	Results     []perImage `json:"results"`
+	Diagnostics string     `json:"diagnostics,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 func envStr(name, def string) string {
@@ -154,10 +153,8 @@ func runBatch() int {
 	sum := process(
 		inputDirFromEnv(),
 		envStr("ANAMNESIS_OUT_DIR", "/out"),
-		envStr("ANAMNESIS_SYMBOLS_DIR", "/symbols"),
 		envPlugins(),
 		envBool("ANAMNESIS_FORCE"),
-		envBool("ANAMNESIS_SYMBOLS_ONLINE"),
 	)
 	if sum.Error != "" {
 		fmt.Fprintln(os.Stderr, sum.Error)
@@ -176,9 +173,9 @@ func runBatch() int {
 	return 0
 }
 
-func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbolsOnline bool) summary {
-	sum := summary{Tool: tool, InputDir: inputDir, OutDir: outDir, SymbolsDir: symbolsDir,
-		SymbolsOnline: symbolsOnline, Force: force, Plugins: len(plugins), Results: []perImage{}}
+func process(inputDir, outDir string, plugins []string, force bool) summary {
+	sum := summary{Tool: tool, InputDir: inputDir, OutDir: outDir,
+		Force: force, Plugins: len(plugins), Results: []perImage{}}
 
 	if fi, err := os.Stat(inputDir); err != nil || !fi.IsDir() {
 		sum.Error = fmt.Sprintf("input dir not found or not a directory: %s (mount /input, or set ANAMNESIS_INPUT_DIR)", inputDir)
@@ -194,12 +191,11 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 		return sum
 	}
 	os.Remove(probe)
-	os.MkdirAll(symbolsDir, 0o755)
 
 	images := discover(inputDir)
 	sum.Images = len(images)
-	fmt.Fprintf(os.Stderr, "[%s] input_dir=%s out_dir=%s symbols_dir=%s symbols_online=%d force=%d plugins=%d images=%d\n",
-		tool, inputDir, outDir, symbolsDir, b2i(symbolsOnline), b2i(force), len(plugins), len(images))
+	fmt.Fprintf(os.Stderr, "[%s] input_dir=%s out_dir=%s force=%d plugins=%d images=%d\n",
+		tool, inputDir, outDir, b2i(force), len(plugins), len(images))
 
 	var diagTails []string
 	for idx, img := range images {
@@ -224,7 +220,7 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 		if len(todo) > 0 {
 			fmt.Fprintf(os.Stderr, "[%s] image %d/%d: %s — running %d collector(s) (%d already done)\n",
 				tool, idx+1, len(images), rel, len(todo), len(plugins)-len(todo))
-			logTail, stalled := runImage(img, dest, todo, symbolsDir, symbolsOnline)
+			logTail, stalled := runImage(img, dest, todo)
 			if stalled != "" {
 				if err := bumpStall(dest, stalled); err != nil {
 					// Without the marker the re-exec would retry forever — fail fast.
@@ -270,16 +266,14 @@ func process(inputDir, outDir, symbolsDir string, plugins []string, force, symbo
 // stalled inside the native engine ("" when none) — the stall is already
 // recorded and the engine is deliberately NOT closed then, since Close would
 // block on the same poisoned locks; the caller re-execs to recover.
-func runImage(img, dest string, todo []string, symbolsDir string, symbolsOnline bool) (string, string) {
+func runImage(img, dest string, todo []string) (string, string) {
 	logPath := filepath.Join(dest, "anamnesis.log")
 	var log strings.Builder
 	logln := func(s string) { log.WriteString(s + "\n") }
 	logln(fmt.Sprintf("[%s] image=%s dest=%s plugins=%s", tool, img, dest, strings.Join(todo, ",")))
 
 	eng, err := memprocfs.Open(img, memprocfs.OpenOptions{
-		LibPath:       os.Getenv("ANAMNESIS_VMM_LIB"),
-		SymbolsDir:    symbolsDir,
-		SymbolsOnline: symbolsOnline,
+		LibPath: os.Getenv("ANAMNESIS_VMM_LIB"),
 	})
 	if err != nil {
 		logln("engine open failed: " + err.Error())

@@ -14,6 +14,9 @@ package memprocfs
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,17 +39,19 @@ type procRef struct {
 	name string
 }
 
-// Open opens the memory image with the MemProcFS vmm library.
+// Open opens the memory image with the MemProcFS vmm library. Always offline:
+// the symbol server is disabled unconditionally — PDB symbols come only from
+// the image's baked Symbols/ cache beside vmm.so (staged into /tmp first when
+// that cache is read-only, see stageSymbols).
 func Open(imagePath string, opt OpenOptions) (Engine, error) {
 	lib := opt.LibPath
 	if lib == "" {
 		lib = defaultLib
 	}
+	stageSymbols(lib)
 	build := func(forensic bool) []mp.Option {
-		opts := []mp.Option{mp.WithDevice(imagePath), mp.WithDisablePython()}
-		if !opt.SymbolsOnline {
-			opts = append(opts, mp.WithDisableSymbolServer())
-		}
+		opts := []mp.Option{mp.WithDevice(imagePath), mp.WithDisablePython(),
+			mp.WithDisableSymbolServer()}
 		if forensic {
 			opts = append(opts, mp.WithForensic(1))
 		}
@@ -64,6 +69,80 @@ func Open(imagePath string, opt OpenOptions) (Engine, error) {
 }
 
 func (e *vmmEngine) Close() error { return e.vmm.Close() }
+
+// stageSymbols makes the baked PDB cache visible to vmm.so. On Linux MemProcFS
+// uses <dir(vmm.so)>/Symbols as its local symbol cache only when that directory
+// is WRITABLE, and silently falls back to the literal "/tmp" otherwise (pdb.c
+// PDB_Initialize_InitialValues) — under a hardened read-only rootfs the baked
+// cache beside vmm.so would never be consulted. Mirror the same writability
+// probe and copy the baked files into /tmp keeping the symsrv layout
+// (<name>/<GUID+age>/<name>), so the fallback path vmm.so actually uses finds
+// them. Best-effort: an unstaged PDB only costs the fields derived from it.
+func stageSymbols(lib string) {
+	src := filepath.Join(filepath.Dir(lib), "Symbols")
+	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
+		return
+	}
+	if probe, err := os.CreateTemp(src, ".anamnesis-probe-*"); err == nil {
+		// The cache is writable: vmm.so will read (and write) it directly.
+		probe.Close()
+		os.Remove(probe.Name())
+		return
+	}
+	staged, failed := false, false
+	filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(src, path)
+		if rerr != nil {
+			return nil
+		}
+		dst := filepath.Join("/tmp", rel)
+		if sfi, serr := os.Stat(path); serr == nil {
+			if dfi, derr := os.Stat(dst); derr == nil && dfi.Size() == sfi.Size() {
+				staged = true // already there (an earlier open or batch re-exec)
+				return nil
+			}
+		}
+		if cerr := copyFile(path, dst); cerr != nil {
+			failed = true
+		} else {
+			staged = true
+		}
+		return nil
+	})
+	if failed && !staged {
+		fmt.Fprintln(os.Stderr, "[anamnesis] baked symbol cache present but could not be staged to /tmp — PDB-derived fields (command_line/sid/user) will stay empty")
+	}
+}
+
+// copyFile copies src to dst atomically (temp file + rename), creating parents.
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".staging-*")
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(tmp, in)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), dst)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
+}
 
 // --- processes ---------------------------------------------------------------
 

@@ -88,10 +88,14 @@ a drop-in for the previous memory-lane container invocation.
 
 ```
 docker run --rm --network none --read-only --tmpfs /tmp \
-  -e ANAMNESIS_PLUGINS= -e ANAMNESIS_FORCE=0 -e ANAMNESIS_SYMBOLS_ONLINE=0 \
-  -v "$input_dir:/input:ro" -v "$out:/out" -v "$symbols:/symbols" \
+  -e ANAMNESIS_PLUGINS= -e ANAMNESIS_FORCE=0 \
+  -v "$input_dir:/input:ro" -v "$out:/out" \
   get-sybers/anamnesis:latest
 ```
+
+The engine is always offline: PDB symbols come from the cache baked into the
+image at build time (`Symbols/` beside `vmm.so`), never the network — there is
+no symbol mount and no symbol variable.
 
 Any CLI argument switches to single-image pass-through
 (`... get-sybers/anamnesis -f /input/<image> -o /out`).
