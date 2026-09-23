@@ -31,6 +31,11 @@ type Process struct {
 	LogonID        string // token AuthenticationId LUID as hex ("0x...")
 	SessionID      int
 	DLLPaths       []string
+	// Recovery names the fields the offline recovery filled and how, as
+	// semicolon-joined field=method pairs (e.g.
+	// "command_line=peb+0x60_anchor;sid=sidraw"); "" when the PDB-backed
+	// reads served everything.
+	Recovery string
 }
 
 // Module is one loaded module in a process (GetModuleList).

@@ -66,11 +66,27 @@ type RecoveredOffset struct {
 	Confidence Confidence `json:"confidence"`
 }
 
+// DiagnosticKind separates a transient failure from a permanent one, so a
+// self-teaching store knows whether a later image of the same build is worth
+// re-attempting for this accessor.
+type DiagnosticKind string
+
+const (
+	// Unresolved: the export could not be resolved or its code could not be
+	// read (e.g. the page was not resident). Another image of the same build
+	// may succeed — worth retrying.
+	Unresolved DiagnosticKind = "unresolved"
+	// Unrecognised: the code was read but carries no [reg+disp] operand in its
+	// prologue. That is deterministic for the build — never worth retrying.
+	Unrecognised DiagnosticKind = "unrecognised"
+)
+
 // Diagnostic records why an accessor did not yield an offset (missing export,
 // unrecognised shape) so the caller can report coverage honestly.
 type Diagnostic struct {
-	Func string `json:"func"`
-	Err  string `json:"err"`
+	Func string         `json:"func"`
+	Kind DiagnosticKind `json:"kind"`
+	Err  string         `json:"err"`
 }
 
 // codeWindow is how many leading bytes of a function a CodeSource is expected to
@@ -87,12 +103,12 @@ func RecoverOffsets(src CodeSource, accessors []Accessor) ([]RecoveredOffset, []
 	for _, a := range accessors {
 		code, _, err := src.FunctionCode(a.Func)
 		if err != nil {
-			diags = append(diags, Diagnostic{a.Func, err.Error()})
+			diags = append(diags, Diagnostic{a.Func, Unresolved, err.Error()})
 			continue
 		}
 		off, ok := AccessorDisplacement(code)
 		if !ok {
-			diags = append(diags, Diagnostic{a.Func, "no [rcx/rdx+disp] memory operand in prologue"})
+			diags = append(diags, Diagnostic{a.Func, Unrecognised, "no [rcx/rdx+disp] memory operand in prologue"})
 			continue
 		}
 		out = append(out, RecoveredOffset{

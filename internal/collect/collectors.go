@@ -29,6 +29,7 @@ func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
 			"Sid":    nilIfEmpty(p.SID), "User": nilIfEmpty(p.User),
 			"LogonId": nilIfEmpty(p.LogonID), "Cwd": nilIfEmpty(p.Cwd),
 			"IntegrityLevel": nilIfEmpty(p.IntegrityLevel), "EnvVars": nilIfEmpty(p.EnvVars),
+			"Recovery": nilIfEmpty(p.Recovery),
 		})
 	}
 	return recs, nil

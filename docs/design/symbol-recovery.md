@@ -261,12 +261,20 @@ anti-forensics suite are larger, and sit behind the core.
 1. Design doc (this file). ✅
 2. Deterministic primitive: `internal/symbols` — `AccessorDisplacement`,
    `RIPTarget`, `ProcessAccessors`, `PEImage`, `cmd/symrec`; unit-tested. ✅
-3. `(GUID, age)` offset store schema + build-time generator (PDB convert +
-   accessor-disassembly of harvested PEs) + engine lookup. ▶ next
+3. `(GUID, age)` offset store: schema, engine lookup, and the self-teaching
+   write-back over the accessor battery (`internal/symbols/store.go`, keyed by
+   the in-memory ntoskrnl's CodeView identity, persisted in the symbol-cache
+   mount under `anamnesis-offsets/`). ✅ — the build-time generator (PDB
+   convert + harvested-PE disassembly) remains. ▶
 4. In-image Tier 2: low-stub CR3, kernel-base, exported anchors, constraint
-   solving, cross-validation. ▶
-5. User-mode recovery: image-path-anchored `command_line`; SID-signature `sid`. ▶
-   (directly closes the #14 gap for unseen ntdll builds)
+   solving, cross-validation. ▶ — first slice landed: the in-memory ntoskrnl
+   accessor disassembly (`recover_vmm.go` `kernelCode` → `RecoverOffsets`)
+   feeds `_EPROCESS.CreateTime` behind a System-process plausibility gate.
+5. User-mode recovery: image-path-anchored `command_line`
+   (`internal/symbols/procparams.go`: PEB → ProcessParameters, fixed offsets
+   validated against the anchor, bounded scan on mismatch, 32-bit variant) ✅;
+   `sid` from the ProcessInfo SID buffer + `user` from the registry-derived
+   user list ✅; the SID-signature token scan for processes those miss. ▶
 6. Deobfuscation: encoded-KDBG (pre-Win10/x86), TypeIndex, handle-entry; keyless
    key recovery via fingerprint + `RIPTarget`. ▶
 7. RE toolbox: emulation of decode stubs; binary-diff porting for tail builds. ▶

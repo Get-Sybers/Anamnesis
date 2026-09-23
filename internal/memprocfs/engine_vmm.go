@@ -27,11 +27,19 @@ const defaultLib = "/opt/anamnesis/lib/vmm.so"
 
 type vmmEngine struct {
 	vmm       *mp.Vmm
+	lib       string // path to vmm.so; the symbol cache and offset store live beside it
 	procCache []Process
 	epToProc  map[uint64]procRef
 	ctOffset  uint32
 	ctTried   bool
 	ctOK      bool
+	ctSource  string // "pdb", "accessor" or "store" — what resolved ctOffset
+	// Offline recovery state (recover_vmm.go).
+	recTried    bool
+	recCTOffset uint32
+	recCTOK     bool
+	recSource   string
+	userBySID   map[string]string
 }
 
 type procRef struct {
@@ -41,8 +49,10 @@ type procRef struct {
 
 // Open opens the memory image with the MemProcFS vmm library. Always offline:
 // the symbol server is disabled unconditionally — PDB symbols come only from
-// the image's baked Symbols/ cache beside vmm.so (staged into /tmp first when
-// that cache is read-only, see stageSymbols).
+// the Symbols/ cache beside vmm.so (a bind-mounted persistent cache, or staged
+// into /tmp when that cache is read-only, see stageSymbols); the fields PDBs
+// would have derived are otherwise recovered from the image itself
+// (recover_vmm.go).
 func Open(imagePath string, opt OpenOptions) (Engine, error) {
 	lib := opt.LibPath
 	if lib == "" {
@@ -65,7 +75,7 @@ func Open(imagePath string, opt OpenOptions) (Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("MemProcFS open %s: %w", imagePath, err)
 	}
-	return &vmmEngine{vmm: vmm}, nil
+	return &vmmEngine{vmm: vmm, lib: lib}, nil
 }
 
 func (e *vmmEngine) Close() error { return e.vmm.Close() }
@@ -158,6 +168,7 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.recoverPrePass()
 	pathByPID := make(map[uint32]string, len(infos))
 	out := make([]Process, 0, len(infos))
 	e.epToProc = make(map[uint64]procRef, len(infos))
@@ -179,6 +190,7 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		if pi.Win.LUID != 0 {
 			p.LogonID = fmt.Sprintf("0x%x", pi.Win.LUID)
 		}
+		e.fillProcess(&p, pi)
 		if p.Path != "" {
 			pathByPID[pi.PID] = p.Path
 		}
@@ -224,23 +236,36 @@ func pathOnly(s string) string {
 	return ""
 }
 
-// createTime reads _EPROCESS.CreateTime via its PDB offset + a kernel memory read.
-// TODO(on-target): confirm the kernel PDB module name ("nt") and kernel-read pid.
+// createTime reads _EPROCESS.CreateTime via a kernel memory read: the offset
+// comes from the PDB when the symbol cache covers the build, else from the
+// offline recovery pre-pass (accessor disassembly / the offset store), whose
+// value already passed the System-process plausibility gate. The read runs in
+// the System process's context — _EPROCESS is global kernel memory, and a
+// user process's own context cannot see it (on-target: only kernel-side
+// processes ever decoded before this).
 func (e *vmmEngine) createTime(pid uint32, eprocess uint64) string {
 	if !e.ctTried {
 		e.ctTried = true
 		if off, err := e.vmm.PdbTypeChildOffset("nt", "_EPROCESS", "CreateTime"); err == nil {
-			e.ctOffset, e.ctOK = off, true
+			e.ctOffset, e.ctOK, e.ctSource = off, true, "pdb"
+		} else if e.recCTOK {
+			e.ctOffset, e.ctOK, e.ctSource = e.recCTOffset, true, e.recSource
 		}
 	}
 	if !e.ctOK || eprocess == 0 {
 		return ""
 	}
-	b, err := e.vmm.MemRead(pid, eprocess+uint64(e.ctOffset), 8)
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset), 8)
 	if err != nil || len(b) < 8 {
 		return ""
 	}
-	return fileTimeToISO(leU64(b))
+	ft := leU64(b)
+	// A recovered offset is held to the plausibility bound per value too; the
+	// PDB path keeps its historical behavior.
+	if e.ctSource != "pdb" && !plausibleFileTime(ft) {
+		return ""
+	}
+	return fileTimeToISO(ft)
 }
 
 // --- spokes ------------------------------------------------------------------
