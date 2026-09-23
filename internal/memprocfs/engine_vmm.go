@@ -239,8 +239,10 @@ func pathOnly(s string) string {
 // createTime reads _EPROCESS.CreateTime via a kernel memory read: the offset
 // comes from the PDB when the symbol cache covers the build, else from the
 // offline recovery pre-pass (accessor disassembly / the offset store), whose
-// value already passed the System-process plausibility gate.
-// TODO(on-target): confirm the kernel PDB module name ("nt") and kernel-read pid.
+// value already passed the System-process plausibility gate. The read runs in
+// the System process's context — _EPROCESS is global kernel memory, and a
+// user process's own context cannot see it (on-target: only kernel-side
+// processes ever decoded before this).
 func (e *vmmEngine) createTime(pid uint32, eprocess uint64) string {
 	if !e.ctTried {
 		e.ctTried = true
@@ -253,7 +255,7 @@ func (e *vmmEngine) createTime(pid uint32, eprocess uint64) string {
 	if !e.ctOK || eprocess == 0 {
 		return ""
 	}
-	b, err := e.vmm.MemRead(pid, eprocess+uint64(e.ctOffset), 8)
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset), 8)
 	if err != nil || len(b) < 8 {
 		return ""
 	}
