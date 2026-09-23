@@ -35,11 +35,13 @@ type vmmEngine struct {
 	ctOK      bool
 	ctSource  string // "pdb", "accessor" or "store" — what resolved ctOffset
 	// Offline recovery state (recover_vmm.go).
-	recTried    bool
-	recCTOffset uint32
-	recCTOK     bool
-	recSource   string
-	userBySID   map[string]string
+	recTried       bool
+	recCTOffset    uint32
+	recCTOK        bool
+	recSource      string
+	recTokenOffset uint32
+	recTokenOK     bool
+	userBySID      map[string]string
 }
 
 type procRef struct {

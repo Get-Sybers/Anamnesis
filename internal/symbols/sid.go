@@ -3,6 +3,7 @@ package symbols
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -52,6 +53,13 @@ func sidFromASCII(raw []byte) (string, bool) {
 // process SID always carries at least one sub-authority; the Windows maximum
 // is 15 (SID_MAX_SUB_AUTHORITIES).
 func sidFromBinary(raw []byte) (string, bool) {
+	return sidBinary(raw, false)
+}
+
+// sidBinary decodes a packed _SID. In strict mode the identifier authority
+// must be a real one (0..16), which lets a memory buffer be swept for SIDs
+// without a random qword — Revision 1, a small count — passing as one.
+func sidBinary(raw []byte, strict bool) (string, bool) {
 	if len(raw) < 8 || raw[0] != 1 {
 		return "", false
 	}
@@ -64,6 +72,9 @@ func sidFromBinary(raw []byte) (string, bool) {
 	for _, b := range raw[2:8] {
 		authority = authority<<8 | uint64(b)
 	}
+	if strict && authority > 16 {
+		return "", false
+	}
 	var sb strings.Builder
 	if authority < 1<<32 {
 		fmt.Fprintf(&sb, "S-1-%d", authority)
@@ -75,4 +86,66 @@ func sidFromBinary(raw []byte) (string, bool) {
 		fmt.Fprintf(&sb, "-%d", binary.LittleEndian.Uint32(raw[8+4*i:]))
 	}
 	return sb.String(), true
+}
+
+// PickUserSID chooses the user SID from the SIDs swept out of a token, and
+// the method for provenance. A SID the registry knows as a real account
+// (knownAccount) is the strongest signal and also yields the account name;
+// otherwise a well-known service identity, then a machine/domain SID
+// (S-1-5-21-*) whose last RID is in the user range (>= 1000). The standard
+// domain group RIDs (< 1000: Domain Admins 512, Domain Users 513, …) are
+// skipped, though a custom domain group with a RID >= 1000 cannot be told
+// from a user here — so the fallback is lowest confidence. Integrity and
+// other group SIDs are passed over. "" when nothing qualifies (docs/design/
+// symbol-recovery.md §6, §10 — heuristic, single-view).
+func PickUserSID(sids []string, knownAccount func(string) bool) (string, string) {
+	for _, s := range sids {
+		if knownAccount != nil && knownAccount(s) {
+			return s, "token+profile"
+		}
+	}
+	for _, s := range sids {
+		switch s {
+		case "S-1-5-18", "S-1-5-19", "S-1-5-20":
+			return s, "token+wellknown"
+		}
+	}
+	for _, s := range sids {
+		if strings.HasPrefix(s, "S-1-5-21-") && lastRID(s) >= 1000 {
+			return s, "token+account"
+		}
+	}
+	return "", ""
+}
+
+// lastRID returns a SID's final sub-authority (its RID), or 0 if unparseable.
+func lastRID(sid string) uint64 {
+	i := strings.LastIndexByte(sid, '-')
+	if i < 0 {
+		return 0
+	}
+	rid, err := strconv.ParseUint(sid[i+1:], 10, 32)
+	if err != nil {
+		return 0
+	}
+	return rid
+}
+
+// ScanSIDs returns every structurally valid _SID found on a 4-byte boundary
+// in buf, deduped in first-seen order. SIDs sit 4-aligned in a token
+// allocation; the strict authority bound keeps a stray qword from reading as
+// a SID, so a token can be swept for the SIDs it carries (docs/design/
+// symbol-recovery.md §6).
+func ScanSIDs(buf []byte) []string {
+	var out []string
+	seen := map[string]bool{}
+	for off := 0; off+8 <= len(buf); off += 4 {
+		s, ok := sidBinary(buf[off:], true)
+		if !ok || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }

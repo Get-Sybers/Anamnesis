@@ -116,6 +116,7 @@ func (e *vmmEngine) recoverPrePass() {
 	}
 
 	entry := stored
+	dirty := false
 	if stored == nil || !stored.Complete(symbols.ProcessAccessors) {
 		offsets, diags := symbols.RecoverOffsets(kernelCode{e.vmm}, symbols.ProcessAccessors)
 		var undecodable []string
@@ -126,6 +127,7 @@ func (e *vmmEngine) recoverPrePass() {
 		}
 		merged, improved := symbols.Merge(stored, key, offsets, undecodable, time.Now().UTC().Format(time.RFC3339))
 		entry = merged
+		dirty = improved
 		switch {
 		case stored == nil:
 			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %d/%d kernel offsets from in-memory ntoskrnl (guid=%s age=%d)\n",
@@ -140,16 +142,47 @@ func (e *vmmEngine) recoverPrePass() {
 		if entry == nil || len(entry.Offsets) == 0 {
 			return
 		}
-		if improved {
-			if dir := e.writableStoreDir(); dir != "" {
-				if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
-					fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
-				}
-			}
-		}
 	} else {
 		fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit (complete, %d/%d offsets) guid=%s age=%d\n",
 			len(entry.Offsets), total, key.GUID, key.Age)
+	}
+
+	// _EPROCESS.Token has no clean accessor to disassemble, so its offset is
+	// constraint-solved: the qword in the System process's _EPROCESS that,
+	// read as an EX_FAST_REF, points to a token carrying S-1-5-18. A stored
+	// offset is trusted only while it still passes that System-process gate;
+	// a stale or poisoned one is re-solved and overwritten, so token recovery
+	// self-heals rather than staying disabled until the store is deleted. The
+	// resolve runs even on an accessor-complete hit, so an entry written
+	// before token recovery existed gains it.
+	tokenOff, haveToken := entry.Offset(tokenScanFunc)
+	tokenOK := haveToken && tokenOff > 0 && e.systemTokenSID(uint32(tokenOff)) == "S-1-5-18"
+	if !tokenOK {
+		if off, found := e.scanTokenOffset(); found {
+			entry.Offsets = upsertOffset(entry.Offsets, symbols.RecoveredOffset{
+				Func: tokenScanFunc, Struct: "_EPROCESS", Field: "Token",
+				Offset: int32(off), Confidence: symbols.BestEffort,
+			})
+			tokenOff, tokenOK, dirty = int32(off), true, true
+			verb := "constraint-solved"
+			if haveToken {
+				verb = "re-solved poisoned"
+			}
+			fmt.Fprintf(os.Stderr, "[anamnesis] %s _EPROCESS.Token offset %#x (guid=%s age=%d)\n", verb, off, key.GUID, key.Age)
+		} else if haveToken {
+			fmt.Fprintf(os.Stderr, "[anamnesis] stored _EPROCESS.Token offset %#x failed the System-process SID gate and could not be re-solved — token SID recovery disabled for this image\n", tokenOff)
+		}
+	}
+	if tokenOK {
+		e.recTokenOffset, e.recTokenOK = uint32(tokenOff), true
+	}
+
+	if dirty && len(entry.Offsets) > 0 {
+		if dir := e.writableStoreDir(); dir != "" {
+			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
+				fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
+			}
+		}
 	}
 
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
@@ -163,6 +196,23 @@ func (e *vmmEngine) recoverPrePass() {
 		}
 	}
 }
+
+// upsertOffset replaces the entry for o.Func, or appends it if absent — so a
+// re-solved offset overwrites a stale stored one rather than duplicating it.
+func upsertOffset(offs []symbols.RecoveredOffset, o symbols.RecoveredOffset) []symbols.RecoveredOffset {
+	for i := range offs {
+		if offs[i].Func == o.Func {
+			offs[i] = o
+			return offs
+		}
+	}
+	return append(offs, o)
+}
+
+// tokenScanFunc is the store key for the constraint-solved _EPROCESS.Token
+// offset — a pseudo-accessor name so it persists and converges beside the
+// disassembled offsets without being counted toward accessor completeness.
+const tokenScanFunc = "TokenScan"
 
 // fillProcess back-fills the fields the PDB-gated reads left empty, per
 // process, tagging each recovered value in Recovery as field=method.
@@ -194,6 +244,12 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 		if s, ok := symbols.DecodeSID(pi.Win.SIDRaw[:]); ok {
 			p.SID = s
 			rec = append(rec, "sid=sidraw")
+		}
+	}
+	if p.SID == "" && e.recTokenOK && pi.Win.EPROCESS != 0 {
+		if sid, method := e.tokenSID(pi.Win.EPROCESS); sid != "" {
+			p.SID = sid
+			rec = append(rec, "sid="+method)
 		}
 	}
 	// Exact SID→account match from the registry-derived table; well-known SIDs
@@ -291,4 +347,95 @@ func plausibleFileTime(ft uint64) bool {
 	}
 	ceiling := uint64(time.Now().Add(24*time.Hour).Unix()+11644473600) * 10_000_000
 	return ft <= ceiling
+}
+
+const (
+	// exFastRefMask clears the EX_FAST_REF reference-count bits (low 4 on x64,
+	// objects being 16-byte aligned) to leave the object pointer.
+	exFastRefMask = ^uint64(0xf)
+	// kernelVAFloor is the low bound of the x64 kernel-canonical range.
+	kernelVAFloor = uint64(0xffff_8000_0000_0000)
+	// tokenWindow is how much of a token allocation is swept for SIDs — the
+	// user and group SIDs sit in the token's variable part, well within this.
+	tokenWindow = 0x800
+)
+
+// tokenScanLo/Hi bound the _EPROCESS window the Token EX_FAST_REF is
+// constraint-solved in (x64 Token sits well inside the first ~0x800 bytes).
+const (
+	tokenScanLo = 0x200
+	tokenScanHi = 0x800
+)
+
+// scanTokenOffset finds _EPROCESS.Token by brute force over the System
+// process: the 8-aligned qword that, masked as an EX_FAST_REF, points to a
+// kernel token allocation carrying S-1-5-18 is the Token field. The exact SID
+// match makes a false hit vanishingly unlikely; the offset is then validated
+// per load and per process anyway.
+func (e *vmmEngine) scanTokenOffset() (uint32, bool) {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return 0, false
+	}
+	buf, err := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+tokenScanLo, tokenScanHi-tokenScanLo)
+	if err != nil {
+		return 0, false
+	}
+	for off := 0; off+8 <= len(buf); off += 8 {
+		token := leU64(buf[off:]) & exFastRefMask
+		if token < kernelVAFloor {
+			continue
+		}
+		tb, terr := e.vmm.MemRead(systemPID, token, tokenWindow)
+		if terr != nil || len(tb) == 0 {
+			continue
+		}
+		for _, s := range symbols.ScanSIDs(tb) {
+			if s == "S-1-5-18" {
+				return uint32(tokenScanLo + off), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// systemTokenSID resolves the System process's primary-token user SID through
+// the candidate _EPROCESS.Token offset — the gate that proves the offset.
+func (e *vmmEngine) systemTokenSID(off uint32) string {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return ""
+	}
+	sid, _ := e.readTokenSID(pi.Win.EPROCESS, off)
+	return sid
+}
+
+// tokenSID resolves a process's primary-token user SID using the validated
+// offset, returning the SID and the selection method for provenance.
+func (e *vmmEngine) tokenSID(eprocess uint64) (string, string) {
+	return e.readTokenSID(eprocess, e.recTokenOffset)
+}
+
+// readTokenSID reads _EPROCESS.Token (an EX_FAST_REF), dereferences it, sweeps
+// the token allocation for its SIDs and picks the user SID. The token is
+// kernel memory, so every read is in the System process's context.
+func (e *vmmEngine) readTokenSID(eprocess uint64, off uint32) (string, string) {
+	if eprocess == 0 || off == 0 {
+		return "", ""
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(off), 8)
+	if err != nil || len(b) < 8 {
+		return "", ""
+	}
+	token := leU64(b) & exFastRefMask
+	if token < kernelVAFloor {
+		return "", ""
+	}
+	buf, err := e.vmm.MemRead(systemPID, token, tokenWindow)
+	if err != nil || len(buf) == 0 {
+		return "", ""
+	}
+	return symbols.PickUserSID(symbols.ScanSIDs(buf), func(s string) bool {
+		return e.userBySID[s] != ""
+	})
 }
