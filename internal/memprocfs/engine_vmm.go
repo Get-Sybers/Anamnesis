@@ -200,6 +200,7 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		if pi.Win.LUID != 0 {
 			p.LogonID = fmt.Sprintf("0x%x", pi.Win.LUID)
 		}
+		p.Terminated = pi.State != 0
 		p.ExitTime = e.exitTimeISO(pi.Win.EPROCESS)
 		e.fillProcess(&p, pi)
 		if p.Path != "" {
@@ -259,8 +260,19 @@ func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 		m[p] = true
 	}
 	procs, perr := e.Processes() // runs the recovery pre-pass; cached
+	if perr != nil {
+		return m, nil
+	}
+	// Every detected process defaults to active — a PID absent from the pid
+	// list (MemProcFS marks it terminated) must not read as hidden by key
+	// absence; only the consensus below may say hidden.
+	for i := range procs {
+		if _, ok := m[procs[i].PID]; !ok {
+			m[procs[i].PID] = true
+		}
+	}
 	linked := e.linkedPIDs()
-	if perr != nil || linked == nil {
+	if linked == nil {
 		return m, nil
 	}
 	for i := range procs {

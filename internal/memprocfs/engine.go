@@ -44,6 +44,9 @@ type Process struct {
 	// process is legitimately unlinked; Hidden is the consensus verdict on
 	// top (unlinked AND still running by every read).
 	Unlinked bool
+	// Terminated is MemProcFS's own state marking (ProcessInfo.State != 0) —
+	// the reason a process can be detected yet absent from the PID list.
+	Terminated bool
 }
 
 // Module is one loaded module in a process (GetModuleList).

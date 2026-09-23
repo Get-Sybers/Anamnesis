@@ -50,7 +50,7 @@ mappings:
       current_working_directory: Cwd
       integrity_level: IntegrityLevel
       env_vars: EnvVars
-    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, ExitTime, LogonId, Recovery]
+    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ExitTime, LogonId, Recovery]
 
   # ---- process ACCESS events -------------------------------------------------
   windows.anamnesis.access:
