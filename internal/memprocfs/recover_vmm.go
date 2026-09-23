@@ -84,12 +84,12 @@ func (e *vmmEngine) recoverPrePass() {
 			}
 		}
 	}
-	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlagDebugInfo)
-	if err != nil || mod == nil || mod.DebugInfo == nil || mod.DebugInfo.GuidString == "" {
-		fmt.Fprintln(os.Stderr, "[anamnesis] offline recovery: no ntoskrnl CodeView identity — kernel-offset recovery skipped")
+	guid, age, err := e.kernelCodeView()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[anamnesis] offline recovery: no ntoskrnl CodeView identity (%v) — kernel-offset recovery skipped\n", err)
 		return
 	}
-	key := symbols.StoreKey{Module: "ntoskrnl.exe", GUID: mod.DebugInfo.GuidString, Age: mod.DebugInfo.Age}
+	key := symbols.StoreKey{Module: "ntoskrnl.exe", GUID: guid, Age: age}
 	var entry *symbols.StoreEntry
 	source := "store"
 	for _, dir := range e.storeDirs() {
@@ -181,6 +181,33 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 	if len(rec) > 0 {
 		p.Recovery = strings.Join(rec, ";")
 	}
+}
+
+// kernelCodeView reads ntoskrnl's CodeView (GUID, age) out of the in-memory
+// module map: the direct name lookup first, then a walk of the System
+// process's module list for the kernel entry (the mapped name varies —
+// ntoskrnl.exe here, ntkrnlmp.exe on some builds).
+func (e *vmmEngine) kernelCodeView() (string, uint32, error) {
+	if mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlagDebugInfo); err == nil &&
+		mod != nil && mod.DebugInfo != nil && mod.DebugInfo.GuidString != "" {
+		return mod.DebugInfo.GuidString, mod.DebugInfo.Age, nil
+	}
+	ml, err := e.vmm.GetModuleList(systemPID, mp.ModuleFlagDebugInfo)
+	if err != nil {
+		return "", 0, fmt.Errorf("module list: %w", err)
+	}
+	for i := range ml.Modules {
+		m := &ml.Modules[i]
+		name := strings.ToLower(m.Name)
+		if !strings.Contains(name, "ntoskrnl") && !strings.Contains(name, "ntkrnl") {
+			continue
+		}
+		if m.DebugInfo == nil || m.DebugInfo.GuidString == "" {
+			return "", 0, fmt.Errorf("%s carries no CodeView debug info", m.Name)
+		}
+		return m.DebugInfo.GuidString, m.DebugInfo.Age, nil
+	}
+	return "", 0, fmt.Errorf("no kernel module among %d System modules", len(ml.Modules))
 }
 
 // storeDirs lists where offset-store entries may live: the persistent symbol
