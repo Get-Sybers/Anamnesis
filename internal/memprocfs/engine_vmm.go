@@ -77,7 +77,9 @@ func (e *vmmEngine) Close() error { return e.vmm.Close() }
 // cache beside vmm.so would never be consulted. Mirror the same writability
 // probe and copy the baked files into /tmp keeping the symsrv layout
 // (<name>/<GUID+age>/<name>), so the fallback path vmm.so actually uses finds
-// them. Best-effort: an unstaged PDB only costs the fields derived from it.
+// them. Best-effort: an unstaged PDB only costs the fields derived from it,
+// but any file that could not be staged — a copy failure or a path the walk
+// could not visit — is warned about, so a partial stage never fails silently.
 func stageSymbols(lib string) {
 	src := filepath.Join(filepath.Dir(lib), "Symbols")
 	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
@@ -89,31 +91,33 @@ func stageSymbols(lib string) {
 		os.Remove(probe.Name())
 		return
 	}
-	staged, failed := false, false
+	failed := false
 	filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			failed = true // an unvisitable path is an unstaged file
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		rel, rerr := filepath.Rel(src, path)
 		if rerr != nil {
+			failed = true
 			return nil
 		}
 		dst := filepath.Join("/tmp", rel)
 		if sfi, serr := os.Stat(path); serr == nil {
 			if dfi, derr := os.Stat(dst); derr == nil && dfi.Size() == sfi.Size() {
-				staged = true // already there (an earlier open or batch re-exec)
-				return nil
+				return nil // already staged (an earlier open or batch re-exec)
 			}
 		}
 		if cerr := copyFile(path, dst); cerr != nil {
 			failed = true
-		} else {
-			staged = true
 		}
 		return nil
 	})
-	if failed && !staged {
-		fmt.Fprintln(os.Stderr, "[anamnesis] baked symbol cache present but could not be staged to /tmp — PDB-derived fields (command_line/sid/user) will stay empty")
+	if failed {
+		fmt.Fprintln(os.Stderr, "[anamnesis] baked symbol cache could not be fully staged to /tmp — PDB-derived fields (command_line/sid/user) may stay empty")
 	}
 }
 
@@ -165,7 +169,7 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 			// MemProcFS falls back to the bare image NAME for kernel-side
 			// processes (System, Registry); a value without a separator is not
 			// a path — image_path stays honestly null, the name lives in exe.
-			Path: pathOnly(e.str(pi.PID, mp.ProcessInformationOptStringPathUserImage)),
+			Path:           pathOnly(e.str(pi.PID, mp.ProcessInformationOptStringPathUserImage)),
 			CommandLine:    e.str(pi.PID, mp.ProcessInformationOptStringCmdline),
 			SID:            e.str(pi.PID, mp.ProcessInformationOptStringSID),
 			SessionID:      int(pi.Win.SessionID),
