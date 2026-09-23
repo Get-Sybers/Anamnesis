@@ -162,6 +162,15 @@ func (e *vmmEngine) recoverPrePass() {
 			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", off)
 		}
 	}
+	if off, ok := entry.Offset("PsReferencePrimaryToken"); ok && off > 0 {
+		// The System process's primary token must yield S-1-5-18 (Local
+		// System); an offset that does not is wrong or poisoned — discarded.
+		if e.systemTokenSID(uint32(off)) == "S-1-5-18" {
+			e.recTokenOffset, e.recTokenOK = uint32(off), true
+		} else {
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.Token offset %#x failed the System-process SID gate — discarded\n", off)
+		}
+	}
 }
 
 // fillProcess back-fills the fields the PDB-gated reads left empty, per
@@ -194,6 +203,12 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 		if s, ok := symbols.DecodeSID(pi.Win.SIDRaw[:]); ok {
 			p.SID = s
 			rec = append(rec, "sid=sidraw")
+		}
+	}
+	if p.SID == "" && e.recTokenOK && pi.Win.EPROCESS != 0 {
+		if sid, method := e.tokenSID(pi.Win.EPROCESS); sid != "" {
+			p.SID = sid
+			rec = append(rec, "sid="+method)
 		}
 	}
 	// Exact SID→account match from the registry-derived table; well-known SIDs
@@ -291,4 +306,56 @@ func plausibleFileTime(ft uint64) bool {
 	}
 	ceiling := uint64(time.Now().Add(24*time.Hour).Unix()+11644473600) * 10_000_000
 	return ft <= ceiling
+}
+
+const (
+	// exFastRefMask clears the EX_FAST_REF reference-count bits (low 4 on x64,
+	// objects being 16-byte aligned) to leave the object pointer.
+	exFastRefMask = ^uint64(0xf)
+	// kernelVAFloor is the low bound of the x64 kernel-canonical range.
+	kernelVAFloor = uint64(0xffff_8000_0000_0000)
+	// tokenWindow is how much of a token allocation is swept for SIDs — the
+	// user and group SIDs sit in the token's variable part, well within this.
+	tokenWindow = 0x800
+)
+
+// systemTokenSID resolves the System process's primary-token user SID through
+// the candidate _EPROCESS.Token offset — the gate that proves the offset.
+func (e *vmmEngine) systemTokenSID(off uint32) string {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return ""
+	}
+	sid, _ := e.readTokenSID(pi.Win.EPROCESS, off)
+	return sid
+}
+
+// tokenSID resolves a process's primary-token user SID using the validated
+// offset, returning the SID and the selection method for provenance.
+func (e *vmmEngine) tokenSID(eprocess uint64) (string, string) {
+	return e.readTokenSID(eprocess, e.recTokenOffset)
+}
+
+// readTokenSID reads _EPROCESS.Token (an EX_FAST_REF), dereferences it, sweeps
+// the token allocation for its SIDs and picks the user SID. The token is
+// kernel memory, so every read is in the System process's context.
+func (e *vmmEngine) readTokenSID(eprocess uint64, off uint32) (string, string) {
+	if eprocess == 0 || off == 0 {
+		return "", ""
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(off), 8)
+	if err != nil || len(b) < 8 {
+		return "", ""
+	}
+	token := leU64(b) & exFastRefMask
+	if token < kernelVAFloor {
+		return "", ""
+	}
+	buf, err := e.vmm.MemRead(systemPID, token, tokenWindow)
+	if err != nil || len(buf) == 0 {
+		return "", ""
+	}
+	return symbols.PickUserSID(symbols.ScanSIDs(buf), func(s string) bool {
+		return e.userBySID[s] != ""
+	})
 }
