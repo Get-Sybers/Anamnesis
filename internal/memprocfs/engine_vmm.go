@@ -41,6 +41,14 @@ type vmmEngine struct {
 	recSource      string
 	recTokenOffset uint32
 	recTokenOK     bool
+	recPIDOffset   uint32
+	recPIDOK       bool
+	recExitOffset  uint32
+	recExitOK      bool
+	recLinksOffset uint32
+	recLinksOK     bool
+	linkedOnce     bool
+	linkedCache    map[uint32]bool
 	userBySID      map[string]string
 }
 
@@ -206,10 +214,13 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	return out, nil
 }
 
-// ActivePIDs: MemProcFS detects processes with multiple methods and does not
-// cleanly separate the active list from scanned-only ones, so every detected PID
-// is reported active (Hidden stays false). TODO(on-target): derive the active
-// PsActiveProcessHead list to restore the Hidden contrast.
+// ActivePIDs reports each detected PID's presence on the kernel's
+// ActiveProcessLinks ring — the pslist/psscan contrast. A detected process
+// that is absent from the ring while its ExitStatus still reads STILL_ACTIVE
+// is marked inactive (the collector's Hidden flag — the DKOM-unlinking
+// primitive of docs/design/symbol-recovery.md §9); an exited process is just
+// exited, never hidden. When the recovered offsets are unavailable every PID
+// reports active, the honest no-contrast fallback.
 func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 	pids, err := e.vmm.GetPidList()
 	if err != nil {
@@ -218,6 +229,20 @@ func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 	m := make(map[uint32]bool, len(pids))
 	for _, p := range pids {
 		m[p] = true
+	}
+	procs, perr := e.Processes() // runs the recovery pre-pass; cached
+	linked := e.linkedPIDs()
+	if perr != nil || linked == nil {
+		return m, nil
+	}
+	for i := range procs {
+		p := &procs[i]
+		if p.PID == 0 || linked[p.PID] {
+			continue
+		}
+		if e.stillActive(p.EPROCESS) {
+			m[p.PID] = false
+		}
 	}
 	return m, nil
 }

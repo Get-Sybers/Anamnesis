@@ -177,6 +177,26 @@ func (e *vmmEngine) recoverPrePass() {
 		e.recTokenOffset, e.recTokenOK = uint32(tokenOff), true
 	}
 
+	// UniqueProcessId and ExitStatus: each offset is consumed only after
+	// decoding the System process to its known value (pid 4, STILL_ACTIVE) —
+	// the same self-quarantine as CreateTime and Token.
+	if off, ok := entry.Offset("PsGetProcessId"); ok && off > 0 && e.systemQwordAt(uint32(off)) == uint64(systemPID) {
+		e.recPIDOffset, e.recPIDOK = uint32(off), true
+	}
+	if off, ok := entry.Offset("PsGetProcessExitStatus"); ok && off > 0 && uint32(e.systemQwordAt(uint32(off))) == stillActiveStatus {
+		e.recExitOffset, e.recExitOK = uint32(off), true
+	}
+	// ActiveProcessLinks directly follows UniqueProcessId on every known x64
+	// build; the adjacency is accepted only when the LIST_ENTRY closure
+	// invariant holds through the System process (§3: x->Flink->Blink == x
+	// and x->Blink->Flink == x).
+	if e.recPIDOK {
+		if cand := e.recPIDOffset + 8; e.linksClosureHolds(cand) {
+			e.recLinksOffset, e.recLinksOK = cand, true
+			fmt.Fprintf(os.Stderr, "[anamnesis] ActiveProcessLinks at UniqueProcessId+8 (%#x) — closure holds, Hidden contrast enabled\n", cand)
+		}
+	}
+
 	if dirty && len(entry.Offsets) > 0 {
 		if dir := e.writableStoreDir(); dir != "" {
 			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
@@ -220,12 +240,12 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 	var rec []string
 	if p.CommandLine == "" {
 		r := vmmReader{e.vmm, pi.PID}
-		var res symbols.CommandLineResult
+		var res symbols.ProcParamsResult
 		var ok bool
 		if pi.Win.PEB != 0 {
-			res, ok = symbols.RecoverCommandLine(r, pi.Win.PEB, p.Path)
+			res, ok = symbols.RecoverProcParams(r, pi.Win.PEB, p.Path)
 		} else if pi.Win.PEB32 != 0 {
-			res, ok = symbols.RecoverCommandLine32(r, pi.Win.PEB32, p.Path)
+			res, ok = symbols.RecoverProcParams32(r, pi.Win.PEB32, p.Path)
 		}
 		if ok {
 			if res.CommandLine != "" {
@@ -237,6 +257,14 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 					p.Path = ip
 					rec = append(rec, "image_path="+res.Method)
 				}
+			}
+			if p.Cwd == "" && res.Cwd != "" {
+				p.Cwd = res.Cwd
+				rec = append(rec, "cwd="+res.Method)
+			}
+			if p.EnvVars == "" && res.Env != "" {
+				p.EnvVars = res.Env
+				rec = append(rec, "env_vars="+res.Method)
 			}
 		}
 	}
@@ -359,6 +387,108 @@ const (
 	// user and group SIDs sit in the token's variable part, well within this.
 	tokenWindow = 0x800
 )
+
+// stillActiveStatus is the NTSTATUS a live process's ExitStatus holds.
+const stillActiveStatus = 0x103
+
+// systemQwordAt reads one qword of the System process's _EPROCESS at the
+// candidate offset; 0 on any failure.
+func (e *vmmEngine) systemQwordAt(off uint32) uint64 {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return 0
+	}
+	b, err := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(off), 8)
+	if err != nil || len(b) < 8 {
+		return 0
+	}
+	return leU64(b)
+}
+
+// linksClosureHolds verifies the LIST_ENTRY at System's _EPROCESS+off closes
+// in both directions: Flink's Blink and Blink's Flink both point back.
+func (e *vmmEngine) linksClosureHolds(off uint32) bool {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return false
+	}
+	entry := pi.Win.EPROCESS + uint64(off)
+	b, err := e.vmm.MemRead(systemPID, entry, 16)
+	if err != nil || len(b) < 16 {
+		return false
+	}
+	flink, blink := leU64(b), leU64(b[8:])
+	if flink < kernelVAFloor || blink < kernelVAFloor {
+		return false
+	}
+	fb, err := e.vmm.MemRead(systemPID, flink+8, 8)
+	if err != nil || len(fb) < 8 || leU64(fb) != entry {
+		return false
+	}
+	bf, err := e.vmm.MemRead(systemPID, blink, 8)
+	return err == nil && len(bf) >= 8 && leU64(bf) == entry
+}
+
+// linkedPIDs walks ActiveProcessLinks from the System process and returns the
+// PIDs on the ring (cached — the walk is per image, not per collector). nil
+// when the offsets are unavailable or the walk does not close plausibly. The
+// list HEAD (PsActiveProcessHead, not inside an _EPROCESS) contributes one
+// junk key; harmless, since the set is only queried for detected PIDs.
+func (e *vmmEngine) linkedPIDs() map[uint32]bool {
+	if e.linkedOnce {
+		return e.linkedCache
+	}
+	e.linkedOnce = true
+	if !e.recLinksOK || !e.recPIDOK {
+		return nil
+	}
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return nil
+	}
+	const maxRing = 8192
+	out := make(map[uint32]bool)
+	start := pi.Win.EPROCESS + uint64(e.recLinksOffset)
+	entry := start
+	for i := 0; i < maxRing; i++ {
+		ep := entry - uint64(e.recLinksOffset)
+		if b, rerr := e.vmm.MemRead(systemPID, ep+uint64(e.recPIDOffset), 8); rerr == nil && len(b) >= 8 {
+			out[uint32(leU64(b))] = true
+		}
+		f, rerr := e.vmm.MemRead(systemPID, entry, 8)
+		if rerr != nil || len(f) < 8 {
+			return nil
+		}
+		next := leU64(f)
+		if next == start {
+			if len(out) < 4 {
+				return nil // implausibly small ring
+			}
+			fmt.Fprintf(os.Stderr, "[anamnesis] active-list ring: %d linked processes\n", len(out))
+			e.linkedCache = out
+			return out
+		}
+		if next < kernelVAFloor {
+			return nil
+		}
+		entry = next
+	}
+	return nil // never closed — corrupt or wrong offset
+}
+
+// stillActive reads a process's ExitStatus through the recovered offset;
+// STILL_ACTIVE means it has not exited. Unknown reads report false, so an
+// unreadable process is never promoted to hidden.
+func (e *vmmEngine) stillActive(eprocess uint64) bool {
+	if !e.recExitOK || eprocess == 0 {
+		return false
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.recExitOffset), 4)
+	if err != nil || len(b) < 4 {
+		return false
+	}
+	return uint32(b[0])|uint32(b[1])<<8|uint32(b[2])<<16|uint32(b[3])<<24 == stillActiveStatus
+}
 
 // tokenScanLo/Hi bound the _EPROCESS window the Token EX_FAST_REF is
 // constraint-solved in (x64 Token sits well inside the first ~0x800 bytes).
