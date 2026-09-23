@@ -240,11 +240,37 @@ func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 		if p.PID == 0 || linked[p.PID] {
 			continue
 		}
-		if e.stillActive(p.EPROCESS) {
+		// Consensus before the accusation (§9): an unlinked process is Hidden
+		// only when three independent reads agree it is still running —
+		// ExitStatus STILL_ACTIVE, ExitTime zero, and at least one thread.
+		// A lingering exited EPROCESS (userinit, acquisition smear) fails
+		// those and is just exited, never hidden.
+		if e.stillActive(p.EPROCESS) && !e.exited(p.EPROCESS) && e.hasThreads(p.PID) {
 			m[p.PID] = false
 		}
 	}
 	return m, nil
+}
+
+// exited reads _EPROCESS.ExitTime — adjacent to CreateTime on every known
+// x64 build — through the recovered offset; nonzero means the process ended.
+// Without a CreateTime offset the answer is unknown and reads as exited, so
+// Hidden is never claimed on missing evidence.
+func (e *vmmEngine) exited(eprocess uint64) bool {
+	if !e.ctOK || eprocess == 0 {
+		return true
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset)+8, 8)
+	if err != nil || len(b) < 8 {
+		return true
+	}
+	return leU64(b) != 0
+}
+
+// hasThreads reports whether the process still owns at least one thread.
+func (e *vmmEngine) hasThreads(pid uint32) bool {
+	tl, err := e.vmm.GetThreadList(pid)
+	return err == nil && tl != nil && len(tl.Threads) > 0
 }
 
 func (e *vmmEngine) str(pid uint32, opt mp.ProcessInfoStringOptions) string {
