@@ -3,6 +3,7 @@ package symbols
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -90,9 +91,13 @@ func sidBinary(raw []byte, strict bool) (string, bool) {
 // PickUserSID chooses the user SID from the SIDs swept out of a token, and
 // the method for provenance. A SID the registry knows as a real account
 // (knownAccount) is the strongest signal and also yields the account name;
-// otherwise a well-known service identity, then any machine/domain account
-// SID (S-1-5-21-*). Group and integrity SIDs are passed over. "" when nothing
-// qualifies (docs/design/symbol-recovery.md §6, §10 — heuristic, single-view).
+// otherwise a well-known service identity, then a machine/domain SID
+// (S-1-5-21-*) whose last RID is in the user range (>= 1000). The standard
+// domain group RIDs (< 1000: Domain Admins 512, Domain Users 513, …) are
+// skipped, though a custom domain group with a RID >= 1000 cannot be told
+// from a user here — so the fallback is lowest confidence. Integrity and
+// other group SIDs are passed over. "" when nothing qualifies (docs/design/
+// symbol-recovery.md §6, §10 — heuristic, single-view).
 func PickUserSID(sids []string, knownAccount func(string) bool) (string, string) {
 	for _, s := range sids {
 		if knownAccount != nil && knownAccount(s) {
@@ -106,11 +111,24 @@ func PickUserSID(sids []string, knownAccount func(string) bool) (string, string)
 		}
 	}
 	for _, s := range sids {
-		if strings.HasPrefix(s, "S-1-5-21-") {
+		if strings.HasPrefix(s, "S-1-5-21-") && lastRID(s) >= 1000 {
 			return s, "token+account"
 		}
 	}
 	return "", ""
+}
+
+// lastRID returns a SID's final sub-authority (its RID), or 0 if unparseable.
+func lastRID(sid string) uint64 {
+	i := strings.LastIndexByte(sid, '-')
+	if i < 0 {
+		return 0
+	}
+	rid, err := strconv.ParseUint(sid[i+1:], 10, 32)
+	if err != nil {
+		return 0
+	}
+	return rid
 }
 
 // ScanSIDs returns every structurally valid _SID found on a 4-byte boundary

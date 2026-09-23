@@ -62,6 +62,8 @@ func TestPickUserSID(t *testing.T) {
 		{"profile account wins", []string{"S-1-16-8192", "S-1-5-21-111-222-333-1001", "S-1-5-32-544"}, known, "S-1-5-21-111-222-333-1001", "token+profile"},
 		{"service identity", []string{"S-1-16-16384", "S-1-5-18", "S-1-1-0"}, known, "S-1-5-18", "token+wellknown"},
 		{"account fallback", []string{"S-1-5-32-544", "S-1-5-21-9-8-7-1050"}, nil, "S-1-5-21-9-8-7-1050", "token+account"},
+		{"domain group RID skipped", []string{"S-1-5-21-9-8-7-513", "S-1-5-21-9-8-7-1104"}, nil, "S-1-5-21-9-8-7-1104", "token+account"},
+		{"only domain groups", []string{"S-1-5-21-9-8-7-512", "S-1-5-21-9-8-7-513"}, nil, "", ""},
 		{"only groups", []string{"S-1-5-32-544", "S-1-1-0", "S-1-16-8192"}, nil, "", ""},
 		{"empty", nil, known, "", ""},
 	}

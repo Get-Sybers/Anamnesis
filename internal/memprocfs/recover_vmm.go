@@ -149,19 +149,32 @@ func (e *vmmEngine) recoverPrePass() {
 
 	// _EPROCESS.Token has no clean accessor to disassemble, so its offset is
 	// constraint-solved: the qword in the System process's _EPROCESS that,
-	// read as an EX_FAST_REF, points to a token carrying S-1-5-18. Once found
-	// it is cached in the store like any other offset and converges the same
-	// way. This runs even on an accessor-complete hit, so an entry written
-	// before token recovery existed gains it on the next run.
-	if _, ok := entry.Offset(tokenScanFunc); !ok {
+	// read as an EX_FAST_REF, points to a token carrying S-1-5-18. A stored
+	// offset is trusted only while it still passes that System-process gate;
+	// a stale or poisoned one is re-solved and overwritten, so token recovery
+	// self-heals rather than staying disabled until the store is deleted. The
+	// resolve runs even on an accessor-complete hit, so an entry written
+	// before token recovery existed gains it.
+	tokenOff, haveToken := entry.Offset(tokenScanFunc)
+	tokenOK := haveToken && tokenOff > 0 && e.systemTokenSID(uint32(tokenOff)) == "S-1-5-18"
+	if !tokenOK {
 		if off, found := e.scanTokenOffset(); found {
-			entry.Offsets = append(entry.Offsets, symbols.RecoveredOffset{
+			entry.Offsets = upsertOffset(entry.Offsets, symbols.RecoveredOffset{
 				Func: tokenScanFunc, Struct: "_EPROCESS", Field: "Token",
 				Offset: int32(off), Confidence: symbols.BestEffort,
 			})
-			dirty = true
-			fmt.Fprintf(os.Stderr, "[anamnesis] constraint-solved _EPROCESS.Token offset %#x (guid=%s age=%d)\n", off, key.GUID, key.Age)
+			tokenOff, tokenOK, dirty = int32(off), true, true
+			verb := "constraint-solved"
+			if haveToken {
+				verb = "re-solved poisoned"
+			}
+			fmt.Fprintf(os.Stderr, "[anamnesis] %s _EPROCESS.Token offset %#x (guid=%s age=%d)\n", verb, off, key.GUID, key.Age)
+		} else if haveToken {
+			fmt.Fprintf(os.Stderr, "[anamnesis] stored _EPROCESS.Token offset %#x failed the System-process SID gate and could not be re-solved — token SID recovery disabled for this image\n", tokenOff)
 		}
+	}
+	if tokenOK {
+		e.recTokenOffset, e.recTokenOK = uint32(tokenOff), true
 	}
 
 	if dirty && len(entry.Offsets) > 0 {
@@ -182,15 +195,18 @@ func (e *vmmEngine) recoverPrePass() {
 			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", off)
 		}
 	}
-	if off, ok := entry.Offset(tokenScanFunc); ok && off > 0 {
-		// The System process's primary token must yield S-1-5-18 (Local
-		// System); an offset that does not is wrong or poisoned — discarded.
-		if e.systemTokenSID(uint32(off)) == "S-1-5-18" {
-			e.recTokenOffset, e.recTokenOK = uint32(off), true
-		} else {
-			fmt.Fprintf(os.Stderr, "[anamnesis] _EPROCESS.Token offset %#x failed the System-process SID gate — discarded\n", off)
+}
+
+// upsertOffset replaces the entry for o.Func, or appends it if absent — so a
+// re-solved offset overwrites a stale stored one rather than duplicating it.
+func upsertOffset(offs []symbols.RecoveredOffset, o symbols.RecoveredOffset) []symbols.RecoveredOffset {
+	for i := range offs {
+		if offs[i].Func == o.Func {
+			offs[i] = o
+			return offs
 		}
 	}
+	return append(offs, o)
 }
 
 // tokenScanFunc is the store key for the constraint-solved _EPROCESS.Token
