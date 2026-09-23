@@ -116,6 +116,7 @@ func (e *vmmEngine) recoverPrePass() {
 	}
 
 	entry := stored
+	dirty := false
 	if stored == nil || !stored.Complete(symbols.ProcessAccessors) {
 		offsets, diags := symbols.RecoverOffsets(kernelCode{e.vmm}, symbols.ProcessAccessors)
 		var undecodable []string
@@ -126,6 +127,7 @@ func (e *vmmEngine) recoverPrePass() {
 		}
 		merged, improved := symbols.Merge(stored, key, offsets, undecodable, time.Now().UTC().Format(time.RFC3339))
 		entry = merged
+		dirty = improved
 		switch {
 		case stored == nil:
 			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %d/%d kernel offsets from in-memory ntoskrnl (guid=%s age=%d)\n",
@@ -140,16 +142,34 @@ func (e *vmmEngine) recoverPrePass() {
 		if entry == nil || len(entry.Offsets) == 0 {
 			return
 		}
-		if improved {
-			if dir := e.writableStoreDir(); dir != "" {
-				if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
-					fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
-				}
-			}
-		}
 	} else {
 		fmt.Fprintf(os.Stderr, "[anamnesis] offset store hit (complete, %d/%d offsets) guid=%s age=%d\n",
 			len(entry.Offsets), total, key.GUID, key.Age)
+	}
+
+	// _EPROCESS.Token has no clean accessor to disassemble, so its offset is
+	// constraint-solved: the qword in the System process's _EPROCESS that,
+	// read as an EX_FAST_REF, points to a token carrying S-1-5-18. Once found
+	// it is cached in the store like any other offset and converges the same
+	// way. This runs even on an accessor-complete hit, so an entry written
+	// before token recovery existed gains it on the next run.
+	if _, ok := entry.Offset(tokenScanFunc); !ok {
+		if off, found := e.scanTokenOffset(); found {
+			entry.Offsets = append(entry.Offsets, symbols.RecoveredOffset{
+				Func: tokenScanFunc, Struct: "_EPROCESS", Field: "Token",
+				Offset: int32(off), Confidence: symbols.BestEffort,
+			})
+			dirty = true
+			fmt.Fprintf(os.Stderr, "[anamnesis] constraint-solved _EPROCESS.Token offset %#x (guid=%s age=%d)\n", off, key.GUID, key.Age)
+		}
+	}
+
+	if dirty && len(entry.Offsets) > 0 {
+		if dir := e.writableStoreDir(); dir != "" {
+			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
+				fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
+			}
+		}
 	}
 
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
@@ -162,16 +182,21 @@ func (e *vmmEngine) recoverPrePass() {
 			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.CreateTime offset %#x failed the System-process plausibility gate — discarded\n", off)
 		}
 	}
-	if off, ok := entry.Offset("PsReferencePrimaryToken"); ok && off > 0 {
+	if off, ok := entry.Offset(tokenScanFunc); ok && off > 0 {
 		// The System process's primary token must yield S-1-5-18 (Local
 		// System); an offset that does not is wrong or poisoned — discarded.
 		if e.systemTokenSID(uint32(off)) == "S-1-5-18" {
 			e.recTokenOffset, e.recTokenOK = uint32(off), true
 		} else {
-			fmt.Fprintf(os.Stderr, "[anamnesis] recovered _EPROCESS.Token offset %#x failed the System-process SID gate — discarded\n", off)
+			fmt.Fprintf(os.Stderr, "[anamnesis] _EPROCESS.Token offset %#x failed the System-process SID gate — discarded\n", off)
 		}
 	}
 }
+
+// tokenScanFunc is the store key for the constraint-solved _EPROCESS.Token
+// offset — a pseudo-accessor name so it persists and converges beside the
+// disassembled offsets without being counted toward accessor completeness.
+const tokenScanFunc = "TokenScan"
 
 // fillProcess back-fills the fields the PDB-gated reads left empty, per
 // process, tagging each recovered value in Recovery as field=method.
@@ -318,6 +343,45 @@ const (
 	// user and group SIDs sit in the token's variable part, well within this.
 	tokenWindow = 0x800
 )
+
+// tokenScanLo/Hi bound the _EPROCESS window the Token EX_FAST_REF is
+// constraint-solved in (x64 Token sits well inside the first ~0x800 bytes).
+const (
+	tokenScanLo = 0x200
+	tokenScanHi = 0x800
+)
+
+// scanTokenOffset finds _EPROCESS.Token by brute force over the System
+// process: the 8-aligned qword that, masked as an EX_FAST_REF, points to a
+// kernel token allocation carrying S-1-5-18 is the Token field. The exact SID
+// match makes a false hit vanishingly unlikely; the offset is then validated
+// per load and per process anyway.
+func (e *vmmEngine) scanTokenOffset() (uint32, bool) {
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return 0, false
+	}
+	buf, err := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+tokenScanLo, tokenScanHi-tokenScanLo)
+	if err != nil {
+		return 0, false
+	}
+	for off := 0; off+8 <= len(buf); off += 8 {
+		token := leU64(buf[off:]) & exFastRefMask
+		if token < kernelVAFloor {
+			continue
+		}
+		tb, terr := e.vmm.MemRead(systemPID, token, tokenWindow)
+		if terr != nil || len(tb) == 0 {
+			continue
+		}
+		for _, s := range symbols.ScanSIDs(tb) {
+			if s == "S-1-5-18" {
+				return uint32(tokenScanLo + off), true
+			}
+		}
+	}
+	return 0, false
+}
 
 // systemTokenSID resolves the System process's primary-token user SID through
 // the candidate _EPROCESS.Token offset — the gate that proves the offset.

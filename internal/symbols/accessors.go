@@ -41,7 +41,6 @@ var ProcessAccessors = []Accessor{
 	{"PsGetProcessExitStatus", "_EPROCESS", "ExitStatus", Definitive, ""},
 	{"PsGetProcessWin32Process", "_EPROCESS", "Win32Process", BestEffort, "wrapper varies by build"},
 	{"PsGetProcessPeb", "_EPROCESS", "Peb", BestEffort, "may compute; verify"},
-	{"PsReferencePrimaryToken", "_EPROCESS", "Token", BestEffort, "EX_FAST_REF; low bits are the refcount"},
 	{"PsIsProtectedProcess", "_EPROCESS", "Protection", BestEffort, "movzx + bit test; offset only"},
 	{"PsIsProtectedProcessLight", "_EPROCESS", "Protection", BestEffort, "movzx + bit test; offset only"},
 	{"PsGetThreadId", "_ETHREAD", "Cid.UniqueThread", Definitive, ""},
