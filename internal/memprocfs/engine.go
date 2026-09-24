@@ -47,6 +47,12 @@ type Process struct {
 	// Terminated is MemProcFS's own state marking (ProcessInfo.State != 0) —
 	// the reason a process can be detected yet absent from the PID list.
 	Terminated bool
+	// ObjTypeConfirmed is set when the process's _OBJECT_HEADER TypeIndex,
+	// deobfuscated with the recovered ObHeaderCookie, resolves to the kernel's
+	// Process type — i.e. this _EPROCESS really is a process object. Only
+	// meaningful when object typing is enabled; ObjTypeChecked records that.
+	ObjTypeChecked   bool
+	ObjTypeConfirmed bool
 }
 
 // Module is one loaded module in a process (GetModuleList).
@@ -60,6 +66,18 @@ type Module struct {
 	Company   string // PE VersionInfo CompanyName (file metadata, not the Authenticode signer)
 	Descr     string // PE VersionInfo FileDescription
 	Version   string // PE VersionInfo FileVersion
+}
+
+// UnloadedModule is a module the kernel recorded as unloaded from a process
+// (MmUnloadedDrivers-style residue for user modules) — loader-tampering and
+// unhooking evidence.
+type UnloadedModule struct {
+	Base       uint64
+	Size       uint64
+	Name       string
+	UnloadTime string // ISO-8601 UTC, "" if unknown
+	UnloadRaw  uint64 // the raw FILETIME (0 if unknown) — a never-nil guid component
+	Wow64      bool
 }
 
 // Thread is one thread (GetThreadList + callstack).
@@ -198,6 +216,7 @@ type Engine interface {
 	MFT() ([]MFTRecord, error)
 	FileScan() ([]FileObject, error)
 	Malfind() ([]MalRegion, error)
+	UnloadedModules(pid uint32) ([]UnloadedModule, error)
 	Close() error
 }
 

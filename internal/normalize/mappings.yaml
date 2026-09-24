@@ -50,7 +50,7 @@ mappings:
       current_working_directory: Cwd
       integrity_level: IntegrityLevel
       env_vars: EnvVars
-    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ExitTime, LogonId, Recovery]
+    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ObjTypeChecked, ObjTypeConfirmed, ExitTime, LogonId, Recovery]
 
   # ---- process TERMINATE events — the _EPROCESS records an exit time ----------
   windows.anamnesis.terminated:
@@ -133,6 +133,22 @@ mappings:
       base_address: Base
       pid: PID
     keep: [Size, LoadCount, ProcessName, Company, Description, Version]
+
+  # ---- module UNLOAD events — the kernel's unloaded-module residue -----------
+  windows.anamnesis.unloaded:
+    object: module
+    action: unload
+    ts: UnloadTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    # UnloadRaw (0 = unknown) keeps the guid stable: a nil component voids a
+    # fields-guid, and most residue entries carry no unload time.
+    guid: {fields: [PID, Base, UnloadRaw]}
+    props:
+      module_name: Name
+      base_address: Base
+      pid: PID
+    keep: [Size, Wow64, ProcessName, UnloadRaw]
 
   windows.anamnesis.network:
     variants:

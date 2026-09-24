@@ -31,7 +31,8 @@ func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
 			"IntegrityLevel": nilIfEmpty(p.IntegrityLevel), "EnvVars": nilIfEmpty(p.EnvVars),
 			"Recovery": nilIfEmpty(p.Recovery),
 			"ExitTime": nilIfEmpty(p.ExitTime), "Unlinked": p.Unlinked,
-			"Terminated": p.Terminated,
+			"Terminated": p.Terminated, "ObjTypeChecked": p.ObjTypeChecked,
+			"ObjTypeConfirmed": p.ObjTypeConfirmed,
 		})
 	}
 	return recs, nil
@@ -365,6 +366,35 @@ func collectServices(eng memprocfs.Engine) ([]car.Record, error) {
 			}
 		}
 		recs = append(recs, r)
+	}
+	return recs, nil
+}
+
+// collectUnloaded -> windows.anamnesis.unloaded: the kernel's unloaded-module
+// residue per process — module/unload CAR events with a real timestamp;
+// leftover residue is unhooking/loader-tampering evidence.
+func collectUnloaded(eng memprocfs.Engine) ([]car.Record, error) {
+	procs, err := eng.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var recs []car.Record
+	for _, p := range procs {
+		mods, err := eng.UnloadedModules(p.PID)
+		if err != nil {
+			continue
+		}
+		for _, m := range mods {
+			recs = append(recs, car.Record{
+				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "Base": m.Base,
+				"Name": nilIfEmpty(m.Name), "Size": m.Size,
+				// UnloadTime nils when unknown (the display/ts field); UnloadRaw
+				// is the never-nil guid component (0 = unknown), because a nil
+				// component voids a fields-guid in normalize.
+				"UnloadTime": nilIfEmpty(m.UnloadTime), "UnloadRaw": m.UnloadRaw,
+				"Wow64": m.Wow64, "ProcessName": nilIfEmpty(p.Name),
+			})
+		}
 	}
 	return recs, nil
 }

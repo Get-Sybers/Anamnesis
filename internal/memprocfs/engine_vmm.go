@@ -54,6 +54,7 @@ type vmmEngine struct {
 	userBySID      map[string]string
 	recObCookie    uint8
 	recObCookieOK  bool
+	recProcTypeIdx uint8 // the kernel Process object-type index (set by the gate)
 }
 
 type procRef struct {
@@ -365,6 +366,28 @@ func (e *vmmEngine) createTime(pid uint32, eprocess uint64) string {
 	return fileTimeToISO(ft)
 }
 
+// keyLastWrite resolves a key's own last-write time: the registry enum API
+// reports it per CHILD, so the key is found among its parent's sub-keys.
+func (e *vmmEngine) keyLastWrite(keyPath string) string {
+	i := strings.LastIndexByte(keyPath, '\\')
+	if i <= 0 {
+		return ""
+	}
+	subs, err := e.vmm.GetRegistrySubKeys(keyPath[:i])
+	if err != nil {
+		return ""
+	}
+	// Sub-key names come back NUL-terminated from the enum buffer; trim before
+	// comparing or the leaf never matches.
+	leaf := keyPath[i+1:]
+	for _, k := range subs {
+		if strings.EqualFold(strings.TrimRight(k.Name, "\x00 "), leaf) && k.LastWriteTime != 0 {
+			return fileTimeToISO(k.LastWriteTime)
+		}
+	}
+	return ""
+}
+
 // --- spokes ------------------------------------------------------------------
 
 func (e *vmmEngine) Modules(pid uint32) ([]Module, error) {
@@ -382,6 +405,23 @@ func (e *vmmEngine) Modules(pid uint32) ([]Module, error) {
 			mod.Company, mod.Descr, mod.Version = m.VersionInfo.CompanyName, m.VersionInfo.FileDescription, m.VersionInfo.FileVersion
 		}
 		out = append(out, mod)
+	}
+	return out, nil
+}
+
+// UnloadedModules reads the kernel's unloaded-module residue for a process.
+func (e *vmmEngine) UnloadedModules(pid uint32) ([]UnloadedModule, error) {
+	ul, err := e.vmm.GetUnloadedModuleList(pid)
+	if err != nil || ul == nil {
+		return nil, err
+	}
+	out := make([]UnloadedModule, 0, len(ul.Modules))
+	for _, m := range ul.Modules {
+		out = append(out, UnloadedModule{
+			Base: m.BaseAddress, Size: uint64(m.ImageSize), Name: m.Name,
+			UnloadTime: fileTimeToISO(m.UnloadTime), UnloadRaw: m.UnloadTime,
+			Wow64: m.IsWow64,
+		})
 	}
 	return out, nil
 }
@@ -588,10 +628,12 @@ func (e *vmmEngine) RegistryValues(targets []string) ([]RegValue, error) {
 				continue
 			}
 			hive := strings.SplitN(t, `\`, 2)[0]
+			lastWrite := e.keyLastWrite(full)
 			for _, v := range vals {
 				out = append(out, RegValue{
 					Hive: root + hive, Key: full, ValueName: v.Name,
 					ValueType: regType(v.Type), ValueData: regData(v.Type, v.Data),
+					LastWrite: lastWrite,
 				})
 			}
 			break // first root that resolved wins

@@ -324,6 +324,19 @@ func (e *vmmEngine) fillProcess(p *Process, pi *mp.ProcessInfo) {
 	if p.CreateTime != "" && e.ctSource != "" && e.ctSource != "pdb" {
 		rec = append(rec, "create_time="+e.ctSource)
 	}
+	// Object-type check: with the cookie validated, this _EPROCESS's own
+	// _OBJECT_HEADER must deobfuscate to the kernel's Process type. A mismatch
+	// means the enumerated "process" is not a real process object — a spoofing
+	// or DKOM signal on data the engine already holds.
+	if e.recObCookieOK && pi.Win.EPROCESS != 0 {
+		if idx, ok := e.objTypeIndex(pi.Win.EPROCESS, e.recObCookie); ok {
+			p.ObjTypeChecked = true
+			p.ObjTypeConfirmed = idx == e.recProcTypeIdx
+			if !p.ObjTypeConfirmed {
+				rec = append(rec, fmt.Sprintf("obj_type=mismatch(%d)", idx))
+			}
+		}
+	}
 	if len(rec) > 0 {
 		p.Recovery = strings.Join(rec, ";")
 	}
@@ -496,7 +509,7 @@ func (e *vmmEngine) gateObCookie(cookieVA uint64) {
 		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (token index implausible or equal to process) — deobfuscation disabled\n", cookie)
 		return
 	}
-	e.recObCookie, e.recObCookieOK = cookie, true
+	e.recObCookie, e.recObCookieOK, e.recProcTypeIdx = cookie, true, procIdx
 	fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie validated (System process TypeIndex=%d) — object typing enabled\n", procIdx)
 }
 

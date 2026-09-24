@@ -38,6 +38,7 @@ var collectorFuncs = map[string]collectFn{
 	"windows.anamnesis.terminated": collectTerminated,
 	"windows.pslist":               collectPslist,
 	"windows.anamnesis.modules":    collectModules,
+	"windows.anamnesis.unloaded":   collectUnloaded,
 	"windows.modules":              collectDrivers,
 	"windows.anamnesis.network":    collectNetwork,
 	"windows.netstat":              collectNetstat,
