@@ -52,6 +52,24 @@ mappings:
       env_vars: EnvVars
     keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ExitTime, LogonId, Recovery]
 
+  # ---- process TERMINATE events — the _EPROCESS records an exit time ----------
+  windows.anamnesis.terminated:
+    object: process
+    action: terminate
+    ts: ExitTime
+    parent_pid: PPID
+    guid: {field: Guid}
+    props:
+      pid: PID
+      ppid: PPID
+      exe: {first: [{basename: Path}, ImageFileName]}
+      image_path: Path
+      command_line: CommandLine
+      user: User
+      sid: Sid
+      uid: Sid
+    keep: [Offset, ImageFileName, CreateTime]
+
   # ---- process ACCESS events -------------------------------------------------
   windows.anamnesis.access:
     object: process
