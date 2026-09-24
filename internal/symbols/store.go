@@ -140,7 +140,9 @@ func Merge(base *StoreEntry, key StoreKey, offsets []RecoveredOffset, undecodabl
 
 // MergeGlobal folds a recovered global into an entry, returning whether it
 // added one (base wins on a name conflict — a seeded/persisted VA stays
-// authoritative). Globals share the (GUID, age) entry with offsets (§11).
+// authoritative). Globals share the (GUID, age) entry with offsets (§11) and
+// stay name-sorted, so the on-disk file is deterministic regardless of
+// recovery order.
 func MergeGlobal(e *StoreEntry, g RecoveredGlobal) bool {
 	for _, existing := range e.Globals {
 		if existing.Name == g.Name {
@@ -148,6 +150,7 @@ func MergeGlobal(e *StoreEntry, g RecoveredGlobal) bool {
 		}
 	}
 	e.Globals = append(e.Globals, g)
+	sort.Slice(e.Globals, func(i, j int) bool { return e.Globals[i].Name < e.Globals[j].Name })
 	return true
 }
 

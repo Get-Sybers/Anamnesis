@@ -59,6 +59,9 @@ func (k kernelCode) FunctionCode(name string) ([]byte, uint64, error) {
 // FunctionCodeN reads up to n leading bytes of an exported routine — the wider
 // window symbols.RecoverGlobalVA needs.
 func (k kernelCode) FunctionCodeN(name string, n int) ([]byte, uint64, error) {
+	if n <= 0 {
+		return nil, 0, fmt.Errorf("invalid code window %d", n)
+	}
 	va, err := k.v.GetProcAddress(systemPID, "ntoskrnl.exe", name)
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve %s: %w", name, err)
@@ -208,14 +211,15 @@ func (e *vmmEngine) recoverPrePass() {
 	// the cookie value is per-boot random, so it is re-read and gated from
 	// this image on every load. Enables correct object typing for future
 	// pool/handle scanning — no user-visible field yet.
-	cookieVA, haveCookieVA := entry.Global("ObHeaderCookie")
+	cookieRef := symbols.KernelGlobals[0] // ObGetObjectType -> ObHeaderCookie
+	cookieVA, haveCookieVA := entry.Global(cookieRef.Global)
 	if !haveCookieVA {
-		if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, symbols.KernelGlobals[0]); found {
+		if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, cookieRef); found {
 			cookieVA, haveCookieVA = va, true
-			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: "ObHeaderCookie", VA: va, Confidence: symbols.BestEffort}) {
+			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: cookieRef.Global, VA: va, Confidence: symbols.BestEffort}) {
 				dirty = true
 			}
-			fmt.Fprintf(os.Stderr, "[anamnesis] recovered ObHeaderCookie reference VA %#x (guid=%s age=%d)\n", va, key.GUID, key.Age)
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %s reference VA %#x (guid=%s age=%d)\n", cookieRef.Global, va, key.GUID, key.Age)
 		}
 	}
 

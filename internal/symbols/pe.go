@@ -237,6 +237,9 @@ func (p *PEImage) FunctionCode(name string) ([]byte, uint64, error) {
 // FunctionCodeN returns up to n leading bytes — the wider window global
 // recovery needs (the referencing instruction can sit into the body).
 func (p *PEImage) FunctionCodeN(name string, n int) ([]byte, uint64, error) {
+	if n <= 0 {
+		return nil, 0, fmt.Errorf("invalid code window %d", n)
+	}
 	rva, ok := p.exports[name]
 	if !ok {
 		return nil, 0, fmt.Errorf("export %q not found", name)
