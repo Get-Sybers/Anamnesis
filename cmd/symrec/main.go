@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"anamnesis/internal/symbols"
@@ -149,11 +151,14 @@ func harvest(dir, pePath, routine, global string, byteOperand bool) int {
 		fmt.Fprintf(os.Stderr, "symrec: %s: no RIP-relative operand to key a signature on\n", routine)
 		return 1
 	}
-	if err := symbols.WriteSignature(dir, "ntoskrnl.exe", sig); err != nil {
+	// The store file is named for the module the bytes came from, so a
+	// signature harvested from a non-kernel PE lands in that module's file.
+	module := strings.ToLower(filepath.Base(pePath))
+	if err := symbols.WriteSignature(dir, module, sig); err != nil {
 		fmt.Fprintln(os.Stderr, "symrec: write:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "symrec: harvested %s -> %s signature (%d bytes, disp32 wildcarded)\n",
-		routine, global, len(sig.Pattern))
+	fmt.Fprintf(os.Stderr, "symrec: harvested %s -> %s signature into %s (%d bytes, disp32 wildcarded)\n",
+		routine, global, module, len(sig.Pattern))
 	return 0
 }

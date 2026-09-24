@@ -422,9 +422,13 @@ func (e *vmmEngine) applyShippedSignatures(entry *symbols.StoreEntry) bool {
 	var sigs []symbols.Signature
 	for _, dir := range e.sigDirs() {
 		s, err := symbols.ReadSignatures(dir, "ntoskrnl.exe")
-		if err == nil {
-			sigs = append(sigs, s...)
+		if err != nil {
+			// A missing file is nil,nil — any error is a broken shipped file,
+			// which must be visible, not a silent fingerprinting no-op.
+			fmt.Fprintf(os.Stderr, "[anamnesis] signature store %s unreadable: %v\n", dir, err)
+			continue
 		}
+		sigs = append(sigs, s...)
 	}
 	dirty := false
 	for _, sig := range sigs {
