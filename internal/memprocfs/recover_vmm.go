@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -921,6 +922,124 @@ func (e *vmmEngine) readQword(va uint64) (uint64, bool) {
 		return 0, false
 	}
 	return leU64(b), true
+}
+
+// procPoolTag is the kernel pool tag on an _EPROCESS allocation.
+var procPoolTag = [4]byte{'P', 'r', 'o', 'c'}
+
+// poolScanProcesses independently discovers process objects by kernel pool tag
+// ("Proc"), a DKOM-resistant view: a process unlinked from ActiveProcessLinks
+// or otherwise hidden from the normal walk still owns its tagged allocation.
+// Each candidate is TYPED via the recovered ObHeaderCookie (its
+// _OBJECT_HEADER.TypeIndex must decode to the Process type index) and gated on
+// a plausible PID, so a false pool hit is discarded rather than reported. The
+// result is cross-checked against the enumerated set; any allocation that
+// resolves to a valid Process object the enumeration missed is returned and
+// logged. A no-op without cookie typing or the PID offset — the gates that
+// make a candidate trustworthy. Called only under ANAMNESIS_POOLSCAN: its one
+// new dependency, GetPoolList, can deadlock on some crash-dump images (the
+// MemProcFS pool subsystem), so it is kept off the default lane. Internal for
+// now: the cross-check is evidence, not yet a user-visible field.
+func (e *vmmEngine) poolScanProcesses() []uint64 {
+	if !e.recObCookieOK || !e.recPIDOK {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan skipped: candidate typing unavailable (ObHeaderCookie ok=%v, PID offset ok=%v)\n", e.recObCookieOK, e.recPIDOK)
+		return nil
+	}
+	pl, err := e.vmm.GetPoolList(mp.PoolMapFlagAll)
+	if err != nil || pl == nil || pl.Count == 0 {
+		// The pool map is built by MemProcFS's pool subsystem, which needs the
+		// forensic mode that a stripped or crash-dump image can decline; say so
+		// rather than skip in silence.
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: pool map unavailable (err=%v) — DKOM-resistant process scan skipped\n", err)
+		return nil
+	}
+	type span struct{ va, end uint64 }
+	var procAllocs []span
+	for i := range pl.Entries {
+		en := &pl.Entries[i]
+		if en.Alloc && en.Tag == procPoolTag {
+			procAllocs = append(procAllocs, span{en.Va, en.Va + uint64(en.Size)})
+		}
+	}
+	if len(procAllocs) == 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d pool allocations but no \"Proc\" tag — scan inconclusive\n", pl.Count)
+		return nil
+	}
+	containing := func(ep uint64) (uint64, bool) {
+		for _, a := range procAllocs {
+			if ep >= a.va && ep < a.end {
+				return a.va, true
+			}
+		}
+		return 0, false
+	}
+	// Calibrate the allocation -> _EPROCESS body delta(s) from the enumerated
+	// processes: the offset is build-stable (the optional-header layout is
+	// near-uniform for processes), and reading it off ground truth needs no
+	// symbols. accounted marks each allocation already tied to a known process.
+	deltas := map[uint64]int{}
+	accounted := map[uint64]bool{}
+	for ep := range e.epToProc {
+		if va, ok := containing(ep); ok {
+			deltas[ep-va]++
+			accounted[va] = true
+		}
+	}
+	if len(deltas) == 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d Proc allocations, none containing an enumerated _EPROCESS — delta uncalibrated, skipped\n", len(procAllocs))
+		return nil
+	}
+	dlist := make([]uint64, 0, len(deltas))
+	for d := range deltas {
+		dlist = append(dlist, d)
+	}
+	sort.Slice(dlist, func(i, j int) bool { return deltas[dlist[i]] > deltas[dlist[j]] })
+
+	var poolOnly []uint64
+	for _, a := range procAllocs {
+		if accounted[a.va] {
+			continue
+		}
+		for _, d := range dlist {
+			ep := a.va + d
+			if ep < kernelVAFloor || ep >= a.end {
+				continue
+			}
+			if idx, ok := e.objTypeIndex(ep, e.recObCookie); !ok || idx != e.recProcTypeIdx {
+				continue // not a Process object at this delta
+			}
+			if !e.plausiblePoolPID(ep) {
+				continue
+			}
+			poolOnly = append(poolOnly, ep)
+			break
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d Proc allocations, %d matched the enumerated set + %d pool-only Process objects (ObHeaderCookie-typed)\n",
+		len(procAllocs), len(accounted), len(poolOnly))
+	for _, ep := range poolOnly {
+		pid := e.readDword(ep + uint64(e.recPIDOffset))
+		fmt.Fprintf(os.Stderr, "[anamnesis]   pool-only process _EPROCESS %#x pid=%d — present in pool, absent from the enumerated set\n", ep, pid)
+	}
+	return poolOnly
+}
+
+// plausiblePoolPID reads a candidate _EPROCESS's PID through the recovered
+// offset and requires a sane, 4-aligned, non-zero value — PIDs are multiples
+// of 4 and never span the full 32 bits.
+func (e *vmmEngine) plausiblePoolPID(ep uint64) bool {
+	pid := e.readDword(ep + uint64(e.recPIDOffset))
+	return pid != 0 && pid%4 == 0 && pid < 0x4000_0000
+}
+
+// readDword reads a little-endian uint32 at an absolute VA (System
+// context), 0 on failure.
+func (e *vmmEngine) readDword(va uint64) uint32 {
+	b, err := e.vmm.MemRead(systemPID, va, 4)
+	if err != nil || len(b) < 4 {
+		return 0
+	}
+	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
 // harvestSignature builds a masked signature from a routine's leading bytes:

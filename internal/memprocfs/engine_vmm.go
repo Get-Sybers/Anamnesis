@@ -238,8 +238,30 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 			}
 		}
 	}
+	// Independent DKOM-resistant confirmation: a pool-tag scan for process
+	// objects, typed via the recovered ObHeaderCookie and cross-checked against
+	// this enumerated set. Opt-in (ANAMNESIS_POOLSCAN): the underlying
+	// MemProcFS pool map (GetPoolList) can deadlock on some crash-dump images,
+	// which would take the whole collector down through the watchdog, so it
+	// stays off the default lane until a deadlock-safe enumeration lands. Where
+	// enabled, it is evidence (logged); pool-only candidates are the seed of a
+	// future hidden-process surface.
+	if poolScanEnabled() {
+		e.poolScanProcesses()
+	}
 	e.procCache = out
 	return out, nil
+}
+
+// poolScanEnabled reports whether ANAMNESIS_POOLSCAN opts in to the pool-tag
+// scan, parsed as a real toggle so an explicit "0"/"false" from automation
+// stays off (matching the batch runner's env-bool convention).
+func poolScanEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ANAMNESIS_POOLSCAN"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // exitTimeISO reads _EPROCESS.ExitTime — adjacent to CreateTime on every
