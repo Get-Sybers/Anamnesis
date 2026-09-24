@@ -200,6 +200,77 @@ func collectFiles(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
+// collectKeys -> windows.anamnesis.keys. Key-type handles: every registry key
+// a process holds open, as registry/access events — the per-process registry
+// surface the curated-key snapshot cannot see. One event per (process, key),
+// with the handle count and the union of granted-access bits kept raw.
+func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
+	procs, err := eng.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var recs []car.Record
+	for _, p := range procs {
+		hs, err := eng.Handles(p.PID)
+		if err != nil {
+			continue
+		}
+		type agg struct {
+			hive, key string
+			access    uint64
+			count     int
+		}
+		byKey := map[string]*agg{}
+		var order []string
+		for _, h := range hs {
+			if h.Type != "Key" || h.Name == "" {
+				continue
+			}
+			hive, key := splitRegistryPath(h.Name)
+			if a, ok := byKey[h.Name]; ok {
+				a.access |= h.GrantedAccess
+				a.count++
+				continue
+			}
+			byKey[h.Name] = &agg{hive: hive, key: key, access: h.GrantedAccess, count: 1}
+			order = append(order, h.Name)
+		}
+		for _, name := range order {
+			a := byKey[name]
+			recs = append(recs, car.Record{
+				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "ProcessName": nilIfEmpty(p.Name),
+				"Hive": nilIfEmpty(a.hive), "Key": nilIfEmpty(a.key), "Path": name,
+				"GrantedAccess": a.access, "Handles": a.count,
+			})
+		}
+	}
+	return recs, nil
+}
+
+// splitRegistryPath maps a kernel key path onto the analyst's hive + key:
+// \REGISTRY\MACHINE\SOFTWARE\X -> ("HKLM", "SOFTWARE\X"),
+// \REGISTRY\USER\<sid>\Y -> ("HKU\<sid>", "Y"); anything else keeps its first
+// two segments as the hive.
+func splitRegistryPath(path string) (hive, key string) {
+	const machine = `\REGISTRY\MACHINE\`
+	const user = `\REGISTRY\USER\`
+	switch {
+	case strings.HasPrefix(path, machine):
+		return "HKLM", path[len(machine):]
+	case strings.HasPrefix(path, user):
+		rest := path[len(user):]
+		if i := strings.IndexByte(rest, '\\'); i >= 0 {
+			return `HKU\` + rest[:i], rest[i+1:]
+		}
+		return `HKU\` + rest, ""
+	}
+	parts := strings.SplitN(strings.TrimPrefix(path, `\`), `\`, 3)
+	if len(parts) == 3 {
+		return `\` + parts[0] + `\` + parts[1], parts[2]
+	}
+	return path, ""
+}
+
 // collectAccess -> windows.anamnesis.access. Process-type handles = observed
 // "A holds access to B" facts.
 func collectAccess(eng memprocfs.Engine) ([]car.Record, error) {

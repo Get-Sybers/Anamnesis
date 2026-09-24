@@ -47,6 +47,7 @@ var collectorFuncs = map[string]collectFn{
 	"windows.svcscan":              collectServices,
 	"windows.anamnesis.threads":    collectThreads,
 	"windows.anamnesis.registry":   collectRegistry,
+	"windows.anamnesis.keys":       collectKeys,
 	"windows.anamnesis.access":     collectAccess,
 	"windows.mftscan.MFTScan":      collectMFT,
 	"windows.malfind":              collectMalfind,
