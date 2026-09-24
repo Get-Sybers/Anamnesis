@@ -252,6 +252,14 @@ func (e *vmmEngine) recoverPrePass() {
 		dirty = true
 	}
 
+	// KdDebuggerDataBlock: locate the block and validate it against its own
+	// "KDBG" tag and our independently-recovered process head. An unencoded
+	// block is found by structural scan; the encoded case needs the wait keys
+	// (a later slice's signature).
+	if e.recoverKdbg(entry) {
+		dirty = true
+	}
+
 	if dirty && len(entry.Offsets) > 0 {
 		if dir := e.writableStoreDir(); dir != "" {
 			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
@@ -679,6 +687,141 @@ func (e *vmmEngine) authorHeadSignature(head uint64) {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "[anamnesis] no authorable reference site for %s in this image\n", headGlobal)
+}
+
+// _KDDEBUGGER_DATA64 field offsets this engine reads — stable across x64
+// builds (the header is 0x18, then KernBase and the two authoritative list
+// heads). kdbgReadLen covers every field consumed here.
+const (
+	kdbgKernBaseOff   = 0x18
+	kdbgModuleListOff = 0x48
+	kdbgProcHeadOff   = 0x50
+	kdbgReadLen       = 0x400
+)
+
+// KDBG decode inputs, as store-global names. Only the block's own location is
+// build-stable and cached; the wait keys are per-boot values re-read live, and
+// KdpDataBlockEncoded contributes its address (not value) to the transform.
+const (
+	kdbgBlockGlobal    = "KdDebuggerDataBlock"
+	kiWaitNeverGlobal  = "KiWaitNever"
+	kiWaitAlwaysGlobal = "KiWaitAlways"
+	kdpEncodedGlobal   = "KdpDataBlockEncoded"
+)
+
+// recoverKdbg locates and validates KdDebuggerDataBlock. A stored block RVA is
+// re-validated and consumed; otherwise the block is found by structural scan
+// (the unencoded case) or decoded with the wait keys (the encoded case, when a
+// signature has supplied them). Every path ends at the same gate — the "KDBG"
+// OwnerTag plus agreement with the independently recovered process head — so a
+// wrong location or a wrong decode is discarded, never trusted. Returns
+// whether the store gained the block's RVA.
+func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
+	base, size, ok := e.kernelSpan()
+	if !ok {
+		return false
+	}
+	if rva, have := entry.Global(kdbgBlockGlobal); have && rva < size {
+		if e.readAndAcceptKdbg(base + rva) {
+			return false // already stored
+		}
+	}
+	// Unencoded structural scan (keyless): the block sits in ntoskrnl's data
+	// with a plaintext "KDBG" tag when kernel debugging is enabled.
+	if image, imgBase, ok := e.kernelImage(); ok {
+		for from := 0; ; {
+			off, found := symbols.ScanKdbgTag(image, from)
+			if !found {
+				break
+			}
+			blockVA := imgBase + uint64(off)
+			if e.readAndAcceptKdbg(blockVA) {
+				return symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: kdbgBlockGlobal, RVA: blockVA - base, Confidence: symbols.BestEffort})
+			}
+			from = off + 4 // a tag hit that failed the gate: keep scanning
+		}
+	}
+	// Encoded case: decode with the wait keys when a signature has populated
+	// all four inputs. Inert until that signature ships; the gate keeps a
+	// wrong decode from ever being consumed.
+	if e.decodeStoredKdbg(entry, base, size) {
+		return false // the block RVA was already stored
+	}
+	fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered (encoded block, wait-key signature not yet available)")
+	return false
+}
+
+// readAndAcceptKdbg reads the block at blockVA from memory and validates it.
+func (e *vmmEngine) readAndAcceptKdbg(blockVA uint64) bool {
+	b, err := e.vmm.MemRead(systemPID, blockVA, kdbgReadLen)
+	if err != nil {
+		return false
+	}
+	return e.acceptKdbg(blockVA, b, false)
+}
+
+// acceptKdbg gates a candidate block (bytes as they will be consumed —
+// natively unencoded, or decoded by us) on its "KDBG" tag and agreement with
+// the ring-anchored PsActiveProcessHead, then records it. decodedByUs marks
+// the encoded path for the log.
+func (e *vmmEngine) acceptKdbg(blockVA uint64, b []byte, decodedByUs bool) bool {
+	if len(b) < kdbgProcHeadOff+8 || !symbols.KdbgTagOK(b) {
+		return false
+	}
+	proc := leU64(b[kdbgProcHeadOff:])
+	if e.recHeadOK && proc != e.recHeadVA {
+		fmt.Fprintf(os.Stderr, "[anamnesis] KDBG at %#x: PsActiveProcessHead %#x disagrees with the ring-anchor head %#x — rejected\n", blockVA, proc, e.recHeadVA)
+		return false
+	}
+	e.recKdbgVA, e.recKdbgOK, e.recKdbgEncoded = blockVA, true, decodedByUs
+	how := "unencoded"
+	if decodedByUs {
+		how = "decoded"
+	}
+	agree := ""
+	if e.recHeadOK {
+		agree = " (agrees with the ring-anchor head)"
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] KdDebuggerDataBlock %#x (%s): KernBase %#x, PsLoadedModuleList %#x, PsActiveProcessHead %#x%s\n",
+		blockVA, how, leU64(b[kdbgKernBaseOff:]), leU64(b[kdbgModuleListOff:]), proc, agree)
+	return true
+}
+
+// decodeStoredKdbg decodes the encoded block using the four store globals a
+// wait-key signature supplies: the block RVA, the two per-boot key values
+// (read live from their RVAs), and KdpDataBlockEncoded's address. The decoded
+// bytes go through the same gate as an unencoded block.
+func (e *vmmEngine) decodeStoredKdbg(entry *symbols.StoreEntry, base, size uint64) bool {
+	blockRVA, ok1 := entry.Global(kdbgBlockGlobal)
+	neverRVA, ok2 := entry.Global(kiWaitNeverGlobal)
+	alwaysRVA, ok3 := entry.Global(kiWaitAlwaysGlobal)
+	encRVA, ok4 := entry.Global(kdpEncodedGlobal)
+	if !(ok1 && ok2 && ok3 && ok4) || blockRVA >= size {
+		return false
+	}
+	never, ok := e.readQword(base + neverRVA)
+	if !ok {
+		return false
+	}
+	always, ok := e.readQword(base + alwaysRVA)
+	if !ok {
+		return false
+	}
+	enc, err := e.vmm.MemRead(systemPID, base+blockRVA, kdbgReadLen)
+	if err != nil {
+		return false
+	}
+	dec := symbols.DecodeKdbg(enc, never, always, base+encRVA)
+	return e.acceptKdbg(base+blockRVA, dec, true)
+}
+
+// readQword reads one little-endian uint64 from memory.
+func (e *vmmEngine) readQword(va uint64) (uint64, bool) {
+	b, err := e.vmm.MemRead(systemPID, va, 8)
+	if err != nil || len(b) < 8 {
+		return 0, false
+	}
+	return leU64(b), true
 }
 
 // harvestSignature builds a masked signature from a routine's leading bytes:
