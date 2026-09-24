@@ -15,6 +15,8 @@ type PEImage struct {
 	imageBase uint64
 	sections  []peSection
 	exports   map[string]uint32 // name -> function RVA
+	debugRVA  uint32            // IMAGE_DIRECTORY_ENTRY_DEBUG
+	debugSize uint32
 }
 
 type peSection struct {
@@ -37,19 +39,21 @@ func newPEImage(f *pe.File) (*PEImage, error) {
 	img := &PEImage{exports: map[string]uint32{}}
 
 	var exportRVA, exportSize uint32
+	dir := func(d []pe.DataDirectory, i int) (uint32, uint32) {
+		if len(d) > i {
+			return d[i].VirtualAddress, d[i].Size
+		}
+		return 0, 0
+	}
 	switch oh := f.OptionalHeader.(type) {
 	case *pe.OptionalHeader64:
 		img.imageBase = oh.ImageBase
-		if len(oh.DataDirectory) > 0 {
-			exportRVA = oh.DataDirectory[0].VirtualAddress
-			exportSize = oh.DataDirectory[0].Size
-		}
+		exportRVA, exportSize = dir(oh.DataDirectory[:], 0)
+		img.debugRVA, img.debugSize = dir(oh.DataDirectory[:], 6)
 	case *pe.OptionalHeader32:
 		img.imageBase = uint64(oh.ImageBase)
-		if len(oh.DataDirectory) > 0 {
-			exportRVA = oh.DataDirectory[0].VirtualAddress
-			exportSize = oh.DataDirectory[0].Size
-		}
+		exportRVA, exportSize = dir(oh.DataDirectory[:], 0)
+		img.debugRVA, img.debugSize = dir(oh.DataDirectory[:], 6)
 	default:
 		return nil, fmt.Errorf("unsupported PE optional header %T", f.OptionalHeader)
 	}
@@ -169,6 +173,45 @@ func (p *PEImage) readCString(rva uint32) string {
 		}
 	}
 	return string(buf)
+}
+
+// CodeView reads the PE's RSDS debug record and returns the module's symbol
+// identity as MemProcFS keys it: the GUID as 32 uppercase hex digits (Data1/2/3
+// little-endian, Data4 verbatim — the symbol-server convention the runtime
+// store key uses) plus the age. This is the (GUID, age) a build-time seed must
+// carry so it matches the runtime GetModuleByName key exactly.
+func (p *PEImage) CodeView() (guid string, age uint32, err error) {
+	if p.debugRVA == 0 || p.debugSize == 0 {
+		return "", 0, fmt.Errorf("no debug directory")
+	}
+	const entrySize = 28 // IMAGE_DEBUG_DIRECTORY
+	dir, ok := p.readAtRVA(p.debugRVA, p.debugSize)
+	if !ok || len(dir) < entrySize {
+		return "", 0, fmt.Errorf("debug directory not readable")
+	}
+	for off := 0; off+entrySize <= len(dir); off += entrySize {
+		e := dir[off:]
+		if binary.LittleEndian.Uint32(e[12:]) != 2 { // Type == IMAGE_DEBUG_TYPE_CODEVIEW
+			continue
+		}
+		size := binary.LittleEndian.Uint32(e[16:])
+		rva := binary.LittleEndian.Uint32(e[20:])
+		if rva == 0 || size < 24 {
+			continue
+		}
+		rec, ok := p.readAtRVA(rva, size)
+		if !ok || len(rec) < 24 || string(rec[:4]) != "RSDS" {
+			continue
+		}
+		g := rec[4:20]
+		guid = fmt.Sprintf("%08X%04X%04X%X",
+			binary.LittleEndian.Uint32(g[0:4]),
+			binary.LittleEndian.Uint16(g[4:6]),
+			binary.LittleEndian.Uint16(g[6:8]),
+			g[8:16]) // Data4: 8 bytes verbatim -> 16 hex digits
+		return guid, binary.LittleEndian.Uint32(rec[20:24]), nil
+	}
+	return "", 0, fmt.Errorf("no RSDS CodeView record in debug directory")
 }
 
 // FunctionCode implements CodeSource: it returns a leading window of an exported
