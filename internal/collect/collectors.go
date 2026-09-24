@@ -247,28 +247,36 @@ func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// splitRegistryPath maps a kernel key path onto the analyst's hive + key:
-// \REGISTRY\MACHINE\SOFTWARE\X -> ("HKLM", "SOFTWARE\X"),
-// \REGISTRY\USER\<sid>\Y -> ("HKU\<sid>", "Y"); anything else keeps its first
-// two segments as the hive.
+// splitRegistryPath maps a key-handle name onto the analyst's hive + key.
+// MemProcFS renders Key handles as "[<hive VA>:<cell>] <hive>\<path>"
+// (optionally with a leading backslash); the kernel's own
+// "\REGISTRY\MACHINE\..." / "\REGISTRY\USER\<sid>\..." forms are handled too.
+// The hive-object annotation stays in the raw Path the caller keeps.
 func splitRegistryPath(path string) (hive, key string) {
-	const machine = `\REGISTRY\MACHINE\`
-	const user = `\REGISTRY\USER\`
+	s := strings.TrimPrefix(path, `\`)
+	// Strip the "[va:cell] " hive-object annotation.
+	if strings.HasPrefix(s, "[") {
+		if i := strings.Index(s, "] "); i >= 0 {
+			s = s[i+2:]
+		}
+	}
+	s = strings.TrimPrefix(s, `\`)
+	const machine = `REGISTRY\MACHINE\`
+	const user = `REGISTRY\USER\`
 	switch {
-	case strings.HasPrefix(path, machine):
-		return "HKLM", path[len(machine):]
-	case strings.HasPrefix(path, user):
-		rest := path[len(user):]
+	case strings.HasPrefix(s, machine):
+		return "HKLM", s[len(machine):]
+	case strings.HasPrefix(s, user):
+		rest := s[len(user):]
 		if i := strings.IndexByte(rest, '\\'); i >= 0 {
 			return `HKU\` + rest[:i], rest[i+1:]
 		}
 		return `HKU\` + rest, ""
 	}
-	parts := strings.SplitN(strings.TrimPrefix(path, `\`), `\`, 3)
-	if len(parts) == 3 {
-		return `\` + parts[0] + `\` + parts[1], parts[2]
+	if i := strings.IndexByte(s, '\\'); i >= 0 {
+		return s[:i], s[i+1:]
 	}
-	return path, ""
+	return s, ""
 }
 
 // collectAccess -> windows.anamnesis.access. Process-type handles = observed
