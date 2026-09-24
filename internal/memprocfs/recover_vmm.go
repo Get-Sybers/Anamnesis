@@ -326,9 +326,28 @@ func (e *vmmEngine) kernelCodeView() (string, uint32, error) {
 	return "", 0, fmt.Errorf("no kernel module among %d System modules", len(ml.Modules))
 }
 
-// storeDirs lists where offset-store entries may live: the persistent symbol
-// cache beside vmm.so (when mounted read-write) and the /tmp fallback.
+// storeDirs lists where offset-store entries may be READ, in priority order:
+// the persistent symbol cache beside vmm.so (the read-write mount), the /tmp
+// fallback, and the read-only seed dir baked into the image (build-time
+// genstore output — ANAMNESIS_SEED_DIR, default /opt/anamnesis/seed-offsets).
+// A seed hit is used as a base; a fuller image still writes the converged
+// entry into the writable cache (writableStoreDir skips the read-only seed),
+// so seeds stay pristine and the mount keeps self-teaching.
 func (e *vmmEngine) storeDirs() []string {
+	dirs := []string{
+		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.StoreSubdir),
+		filepath.Join("/tmp", symbols.StoreSubdir),
+	}
+	seed := os.Getenv("ANAMNESIS_SEED_DIR")
+	if seed == "" {
+		seed = "/opt/anamnesis/seed-offsets"
+	}
+	return append(dirs, seed)
+}
+
+// writableStoreCandidates is the subset of storeDirs the engine may write to —
+// the baked seed dir is read-only and excluded.
+func (e *vmmEngine) writableStoreCandidates() []string {
 	return []string{
 		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.StoreSubdir),
 		filepath.Join("/tmp", symbols.StoreSubdir),
@@ -340,7 +359,7 @@ func (e *vmmEngine) storeDirs() []string {
 // read-only Symbols mount (where the parent exists but the subdir cannot be
 // made) correctly falls through to the /tmp store. "" when neither works.
 func (e *vmmEngine) writableStoreDir() string {
-	for _, dir := range e.storeDirs() {
+	for _, dir := range e.writableStoreCandidates() {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			continue
 		}
