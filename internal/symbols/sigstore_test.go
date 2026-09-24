@@ -68,3 +68,32 @@ func TestReadSignaturesAbsent(t *testing.T) {
 		t.Fatalf("absent sig file must be (nil, nil): (%+v, %v)", got, err)
 	}
 }
+
+func TestBuildSignatureAround(t *testing.T) {
+	// A scan-found site: leading context bytes, then lea rax,[rip+disp] whose
+	// disp32 are the window's last four bytes.
+	window := []byte{0x90, 0x90, 0x48, 0x8D, 0x05, 0x11, 0x22, 0x33, 0x44}
+	sig, ok := BuildSignatureAround("R.ref", "G", window, false)
+	if !ok || len(sig.Pattern) != len(window) {
+		t.Fatalf("signature = (%+v, %v)", sig, ok)
+	}
+	for i := 0; i < len(window)-4; i++ {
+		if sig.Mask[i] != 0xFF {
+			t.Errorf("context byte %d must be pinned", i)
+		}
+	}
+	for i := len(window) - 4; i < len(window); i++ {
+		if sig.Mask[i] != 0x00 {
+			t.Errorf("disp byte %d must be wildcarded", i)
+		}
+	}
+	// Must match a build where only the displacement differs.
+	other := append([]byte(nil), window...)
+	other[len(other)-4], other[len(other)-1] = 0xAA, 0xBB
+	if !matchAt(other, sig.Pattern, sig.Mask) {
+		t.Fatal("signature must match across a differing displacement")
+	}
+	if _, ok := BuildSignatureAround("R", "G", window[:7], false); ok {
+		t.Fatal("a window too short to carry context + disp32 yields no signature")
+	}
+}

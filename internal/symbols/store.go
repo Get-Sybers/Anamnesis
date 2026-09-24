@@ -42,21 +42,26 @@ type StoreEntry struct {
 	Updated     string            `json:"updated,omitempty"`     // RFC3339 UTC, last convergence write
 }
 
-// RecoveredGlobal is a kernel global's virtual address, recovered keyless from
-// a routine that references it. Only the VA is build-stable and cached; a
-// value like ObHeaderCookie is per-boot random, so it is re-read and re-gated
-// from each image rather than trusted from the store.
+// RecoveredGlobal is a kernel global's module-relative address, recovered
+// keyless from a routine that references it. Only the RVA is build-stable and
+// cached — under KASLR the virtual address changes every boot, so a VA from
+// one image is wrong for another image of the same build; the consumer adds
+// the current image's module base. A value like ObHeaderCookie is also
+// per-boot random, so it is re-read and re-gated from each image rather than
+// trusted from the store.
 type RecoveredGlobal struct {
 	Name       string     `json:"name"`
-	VA         uint64     `json:"va"`
+	RVA        uint64     `json:"rva"`
 	Confidence Confidence `json:"confidence"`
 }
 
-// Global returns the recovered VA for a named global.
+// Global returns the recovered RVA for a named global. An entry without an
+// RVA (a file written before globals were module-relative) is reported
+// absent, so it is re-recovered rather than consumed as address zero.
 func (e *StoreEntry) Global(name string) (uint64, bool) {
 	for _, g := range e.Globals {
-		if g.Name == name {
-			return g.VA, true
+		if g.Name == name && g.RVA != 0 {
+			return g.RVA, true
 		}
 	}
 	return 0, false
@@ -139,14 +144,19 @@ func Merge(base *StoreEntry, key StoreKey, offsets []RecoveredOffset, undecodabl
 }
 
 // MergeGlobal folds a recovered global into an entry, returning whether it
-// added one (base wins on a name conflict — a seeded/persisted VA stays
-// authoritative). Globals share the (GUID, age) entry with offsets (§11) and
-// stay name-sorted, so the on-disk file is deterministic regardless of
+// added one (base wins on a name conflict — a seeded/persisted RVA stays
+// authoritative; an entry with no RVA carries nothing worth keeping and is
+// upgraded in place). Globals share the (GUID, age) entry with offsets (§11)
+// and stay name-sorted, so the on-disk file is deterministic regardless of
 // recovery order.
 func MergeGlobal(e *StoreEntry, g RecoveredGlobal) bool {
-	for _, existing := range e.Globals {
+	for i, existing := range e.Globals {
 		if existing.Name == g.Name {
-			return false
+			if existing.RVA != 0 {
+				return false
+			}
+			e.Globals[i] = g
+			return true
 		}
 	}
 	e.Globals = append(e.Globals, g)

@@ -188,3 +188,28 @@ func TestStoreFileNameSanitized(t *testing.T) {
 		t.Fatalf("file name %q escapes the store directory", name)
 	}
 }
+
+func TestGlobalsAreRVAKeyed(t *testing.T) {
+	e := &StoreEntry{}
+	if !MergeGlobal(e, RecoveredGlobal{Name: "G", RVA: 0x1234, Confidence: BestEffort}) {
+		t.Fatal("first merge must add")
+	}
+	if MergeGlobal(e, RecoveredGlobal{Name: "G", RVA: 0x9999, Confidence: BestEffort}) {
+		t.Fatal("an existing RVA is authoritative — base wins")
+	}
+	if rva, ok := e.Global("G"); !ok || rva != 0x1234 {
+		t.Fatalf("Global = (%#x, %v), want (0x1234, true)", rva, ok)
+	}
+	// A legacy entry (written before globals were module-relative) unmarshals
+	// with RVA 0: reported absent, and upgraded in place by a fresh recovery.
+	legacy := &StoreEntry{Globals: []RecoveredGlobal{{Name: "G", RVA: 0, Confidence: BestEffort}}}
+	if _, ok := legacy.Global("G"); ok {
+		t.Fatal("a zero-RVA entry must read as absent, never as address zero")
+	}
+	if !MergeGlobal(legacy, RecoveredGlobal{Name: "G", RVA: 0x4321, Confidence: BestEffort}) {
+		t.Fatal("a zero-RVA entry must be upgraded in place")
+	}
+	if rva, _ := legacy.Global("G"); rva != 0x4321 || len(legacy.Globals) != 1 {
+		t.Fatalf("upgrade produced (%#x, %d entries), want (0x4321, 1)", rva, len(legacy.Globals))
+	}
+}
