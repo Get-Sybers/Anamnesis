@@ -375,12 +375,18 @@ func (e *vmmEngine) keyLastWrite(keyPath string) string {
 	}
 	subs, err := e.vmm.GetRegistrySubKeys(keyPath[:i])
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[anamnesis][dbg] subkeys(%q) err=%v\n", keyPath[:i], err)
 		return ""
 	}
 	leaf := keyPath[i+1:]
+	fmt.Fprintf(os.Stderr, "[anamnesis][dbg] parent=%q leaf=%q subkeys=%d sample=%q\n", keyPath[:i], leaf, len(subs), sampleNames(subs))
 	for _, k := range subs {
-		if strings.EqualFold(k.Name, leaf) && k.LastWriteTime != 0 {
-			return fileTimeToISO(k.LastWriteTime)
+		name := strings.TrimRight(k.Name, "\x00 ")
+		if strings.EqualFold(name, leaf) {
+			fmt.Fprintf(os.Stderr, "[anamnesis][dbg] matched %q lastwrite=%#x\n", name, k.LastWriteTime)
+			if k.LastWriteTime != 0 {
+				return fileTimeToISO(k.LastWriteTime)
+			}
 		}
 	}
 	return ""
@@ -919,4 +925,16 @@ func utf16LE(b []byte) string {
 		sb.WriteRune(c)
 	}
 	return sb.String()
+}
+
+// sampleNames is a debug helper: the first few sub-key names.
+func sampleNames(subs []mp.RegistryKey) []string {
+	var out []string
+	for i, k := range subs {
+		if i >= 4 {
+			break
+		}
+		out = append(out, k.Name)
+	}
+	return out
 }
