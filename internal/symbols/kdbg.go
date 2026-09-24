@@ -89,13 +89,20 @@ func ScanKdbgTag(image []byte, from int) (blockOff int, ok bool) {
 
 // KdbgTagOK reports whether a block (decoded, or natively unencoded) carries
 // the "KDBG" OwnerTag with a plausible Header.Size — the self-validating check
-// that a decode was correct or a scanned block is genuine. size is bounded
-// generously: real blocks are a few hundred to ~0x360 bytes across builds.
+// that a decode was correct or a scanned block is genuine. Real blocks run a
+// few hundred bytes to ~0x360 across builds; the upper bound is KdbgReadLen,
+// the window the engine actually consumes, so the gate never blesses a block
+// larger than anything it reads.
 func KdbgTagOK(block []byte) bool {
 	if len(block) < kdbgOwnerTagOffset+8 {
 		return false
 	}
 	tag := binary.LittleEndian.Uint32(block[kdbgOwnerTagOffset:])
 	size := binary.LittleEndian.Uint32(block[kdbgOwnerTagOffset+4:])
-	return tag == KdbgOwnerTag && size >= 0x40 && size <= 0x1000
+	return tag == KdbgOwnerTag && size >= 0x40 && size <= KdbgReadLen
 }
+
+// KdbgReadLen is the block window the engine reads and decodes — enough to
+// cover every _KDDEBUGGER_DATA64 field consumed, and the plausibility ceiling
+// for Header.Size.
+const KdbgReadLen = 0x400

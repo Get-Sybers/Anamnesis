@@ -696,7 +696,7 @@ const (
 	kdbgKernBaseOff   = 0x18
 	kdbgModuleListOff = 0x48
 	kdbgProcHeadOff   = 0x50
-	kdbgReadLen       = 0x400
+	kdbgReadLen       = symbols.KdbgReadLen
 )
 
 // KDBG decode inputs, as store-global names. Only the block's own location is
@@ -728,7 +728,9 @@ func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
 	}
 	// Unencoded structural scan (keyless): the block sits in ntoskrnl's data
 	// with a plaintext "KDBG" tag when kernel debugging is enabled.
-	if image, imgBase, ok := e.kernelImage(); ok {
+	image, imgBase, imgOK := e.kernelImage()
+	sawRejected := false
+	if imgOK {
 		for from := 0; ; {
 			off, found := symbols.ScanKdbgTag(image, from)
 			if !found {
@@ -738,7 +740,8 @@ func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
 			if e.readAndAcceptKdbg(blockVA) {
 				return symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: kdbgBlockGlobal, RVA: blockVA - base, Confidence: symbols.BestEffort})
 			}
-			from = off + 4 // a tag hit that failed the gate: keep scanning
+			sawRejected = true // a "KDBG" tag that failed the plausibility/head gate
+			from = off + 4
 		}
 	}
 	// Encoded case: decode with the wait keys when a signature has populated
@@ -747,7 +750,14 @@ func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
 	if e.decodeStoredKdbg(entry, base, size) {
 		return false // the block RVA was already stored
 	}
-	fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered (encoded block, wait-key signature not yet available)")
+	switch {
+	case !imgOK:
+		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: ntoskrnl image unreadable")
+	case sawRejected:
+		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: a \"KDBG\" tag was found but failed the plausibility/head gate")
+	default:
+		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: no unencoded block; the encoded decode needs the wait-key signature")
+	}
 	return false
 }
 
@@ -768,7 +778,15 @@ func (e *vmmEngine) acceptKdbg(blockVA uint64, b []byte, decodedByUs bool) bool 
 	if len(b) < kdbgProcHeadOff+8 || !symbols.KdbgTagOK(b) {
 		return false
 	}
+	kern := leU64(b[kdbgKernBaseOff:])
+	modList := leU64(b[kdbgModuleListOff:])
 	proc := leU64(b[kdbgProcHeadOff:])
+	// The three authoritative pointers must be canonical kernel VAs. This is
+	// the plausibility floor that stands in for the head cross-check when no
+	// head was independently recovered, and a cheap extra guard when one was.
+	if kern < kernelVAFloor || modList < kernelVAFloor || proc < kernelVAFloor {
+		return false
+	}
 	if e.recHeadOK && proc != e.recHeadVA {
 		fmt.Fprintf(os.Stderr, "[anamnesis] KDBG at %#x: PsActiveProcessHead %#x disagrees with the ring-anchor head %#x — rejected\n", blockVA, proc, e.recHeadVA)
 		return false
@@ -778,12 +796,12 @@ func (e *vmmEngine) acceptKdbg(blockVA uint64, b []byte, decodedByUs bool) bool 
 	if decodedByUs {
 		how = "decoded"
 	}
-	agree := ""
+	agree := " (PsActiveProcessHead is canonical; no ring-anchor head to cross-check)"
 	if e.recHeadOK {
 		agree = " (agrees with the ring-anchor head)"
 	}
 	fmt.Fprintf(os.Stderr, "[anamnesis] KdDebuggerDataBlock %#x (%s): KernBase %#x, PsLoadedModuleList %#x, PsActiveProcessHead %#x%s\n",
-		blockVA, how, leU64(b[kdbgKernBaseOff:]), leU64(b[kdbgModuleListOff:]), proc, agree)
+		blockVA, how, kern, modList, proc, agree)
 	return true
 }
 
