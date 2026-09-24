@@ -238,6 +238,11 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 			}
 		}
 	}
+	// Independent DKOM-resistant confirmation: a pool-tag scan for process
+	// objects, typed via the recovered ObHeaderCookie and cross-checked
+	// against this enumerated set. Evidence for now (logged); pool-only
+	// candidates are the seed of a future hidden-process surface.
+	e.poolScanProcesses()
 	e.procCache = out
 	return out, nil
 }
