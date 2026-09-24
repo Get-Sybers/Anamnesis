@@ -214,14 +214,17 @@ func (e *vmmEngine) recoverPrePass() {
 	// image on every load. Enables correct object typing for future
 	// pool/handle scanning — no user-visible field yet.
 	cookieRef := symbols.KernelGlobals[0] // ObGetObjectType -> ObHeaderCookie
-	kBase, _, haveSpan := e.kernelSpan()
+	kBase, kSize, haveSpan := e.kernelSpan()
 	var cookieVA uint64
 	var haveCookieVA bool
-	if rva, have := entry.Global(cookieRef.Global); have && haveSpan {
+	// An RVA is only meaningful inside the module span — enforced both when a
+	// stored value is consumed and before a fresh recovery is persisted, so an
+	// out-of-module address is never cached or read through.
+	if rva, have := entry.Global(cookieRef.Global); have && haveSpan && rva < kSize {
 		cookieVA, haveCookieVA = kBase+rva, true
 	} else if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, cookieRef); found {
 		cookieVA, haveCookieVA = va, true
-		if haveSpan && va > kBase {
+		if haveSpan && va > kBase && va-kBase < kSize {
 			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: cookieRef.Global, RVA: va - kBase, Confidence: symbols.BestEffort}) {
 				dirty = true
 			}
@@ -430,10 +433,11 @@ func (e *vmmEngine) fingerprintGroundTruth() {
 // sigDirs lists where fingerprint signatures are READ, in priority order: the
 // persistent cache beside vmm.so, the /tmp fallback, and the read-only baked
 // seed dir (ANAMNESIS_SIG_DIR, default /opt/anamnesis/seed-signatures).
-// Signatures generalize across builds, so they are not per-(GUID,age) — and
-// the cache self-teaches: an in-image anchor recovery AUTHORS a signature
-// into the writable location, so the next image (any build) locates the same
-// global by pattern.
+// Signatures are not per-(GUID,age) — a masked pattern carries wherever the
+// code shape does — and the cache self-teaches: an in-image anchor recovery
+// AUTHORS a signature into the writable location, so a later image whose
+// build shares that shape may locate the same global by pattern; one that
+// does not match is skipped and recovered by its own anchor.
 func (e *vmmEngine) sigDirs() []string {
 	dirs := []string{
 		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.SigSubdir),
@@ -575,9 +579,9 @@ func (e *vmmEngine) headRingGate(head uint64) bool {
 // which is a global in the kernel image, so the single ring entry inside the
 // ntoskrnl span IS the head (§6 structural anchor, no signature needed). On
 // an anchor recovery the head's signature is authored from this image into
-// the writable signature store, so a LATER image — any build — can locate it
-// by pattern even before its own ring is walked. Returns whether entry gained
-// the global.
+// the writable signature store, so a later image whose build shares the code
+// shape may locate it by pattern before its own ring is walked. Returns
+// whether entry gained the global.
 func (e *vmmEngine) recoverProcessHead(entry *symbols.StoreEntry) bool {
 	if e.recHeadOK {
 		return false // a stored signature already located and gated it
@@ -586,7 +590,7 @@ func (e *vmmEngine) recoverProcessHead(entry *symbols.StoreEntry) bool {
 	if !ok {
 		return false
 	}
-	if rva, have := entry.Global(headGlobal); have {
+	if rva, have := entry.Global(headGlobal); have && rva < size {
 		if va := base + rva; e.headRingGate(va) {
 			e.recHeadVA, e.recHeadOK = va, true
 			return false
