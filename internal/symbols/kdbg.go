@@ -87,6 +87,92 @@ func ScanKdbgTag(image []byte, from int) (blockOff int, ok bool) {
 	return 0, false
 }
 
+// KdbgCopySite is one candidate nt!KdCopyDataBlock — the kernel's own KDBG
+// decoder, and the one routine that references every input the transform
+// needs. FlagVA is KdpDataBlockEncoded (from the identifying CMP); Blocks are
+// the LEA targets (KdDebuggerDataBlock candidates); Keys are the MOV/XOR
+// RIP-load targets (KiWaitNever / KiWaitAlways candidates, unordered — the
+// consumer tries both assignments and lets the decoded "KDBG" tag pick).
+type KdbgCopySite struct {
+	FlagVA uint64
+	Blocks []uint64
+	Keys   []uint64
+}
+
+// kdbgCopyWindow bounds the instruction walk after the identifying CMP.
+const kdbgCopyWindow = 0x140
+
+// FindKdbgCopySites scans a kernel image for KdCopyDataBlock candidates: a
+// `CMP byte ptr [rip+d32], imm8` (80 3D — the KdpDataBlockEncoded test) whose
+// following window contains a 64-bit BSWAP (the transform's signature
+// instruction). Within that window it collects the RIP-relative LEA targets
+// and MOV/XOR load targets. False positives are expected and harmless — every
+// candidate combination is proven or discarded by the decoded block's own
+// "KDBG" tag, never trusted from the match alone.
+func FindKdbgCopySites(image []byte, base uint64) []KdbgCopySite {
+	var sites []KdbgCopySite
+	for p := 0; p+7 <= len(image) && len(sites) < 8; p++ {
+		if image[p] != 0x80 || image[p+1] != 0x3D {
+			continue
+		}
+		end := p + kdbgCopyWindow
+		if end > len(image) {
+			end = len(image)
+		}
+		win := image[p:end]
+		if !hasBswap64(win) {
+			continue
+		}
+		site := KdbgCopySite{
+			FlagVA: base + uint64(p+7) + uint64(int64(int32(binary.LittleEndian.Uint32(image[p+2:])))),
+		}
+		for q := 7; q+7 <= len(win); q++ {
+			rex := win[q]
+			if rex != 0x48 && rex != 0x4C {
+				continue
+			}
+			op, modrm := win[q+1], win[q+2]
+			if modrm&0xC7 != 0x05 {
+				continue
+			}
+			target := base + uint64(p+q+7) + uint64(int64(int32(binary.LittleEndian.Uint32(win[q+3:]))))
+			switch op {
+			case 0x8D: // lea r64, [rip+d32]
+				if len(site.Blocks) < 4 && !contains(site.Blocks, target) {
+					site.Blocks = append(site.Blocks, target)
+				}
+			case 0x8B, 0x33: // mov / xor r64, [rip+d32]
+				if len(site.Keys) < 4 && !contains(site.Keys, target) {
+					site.Keys = append(site.Keys, target)
+				}
+			}
+		}
+		if len(site.Blocks) >= 1 && len(site.Keys) >= 2 {
+			sites = append(sites, site)
+		}
+	}
+	return sites
+}
+
+// hasBswap64 reports a REX.W/REX.WB bswap r64 (48|49 0F C8+r) in code.
+func hasBswap64(code []byte) bool {
+	for i := 0; i+3 <= len(code); i++ {
+		if (code[i] == 0x48 || code[i] == 0x49) && code[i+1] == 0x0F && code[i+2]&0xF8 == 0xC8 {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(s []uint64, v uint64) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // KdbgTagOK reports whether a block (decoded, or natively unencoded) carries
 // the "KDBG" OwnerTag with a plausible Header.Size — the self-validating check
 // that a decode was correct or a scanned block is genuine. Real blocks run a

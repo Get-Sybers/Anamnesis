@@ -69,3 +69,46 @@ func TestKdbgTagRejectsWrongKeys(t *testing.T) {
 		t.Fatal("wrong KdpDataBlockEncoded address must not decode to a valid tag")
 	}
 }
+
+func TestFindKdbgCopySites(t *testing.T) {
+	// A synthetic KdCopyDataBlock: the flag test, the block LEA, the two key
+	// loads (Win8-style MOV + Win8.1-style XOR), the transform's BSWAP, RET.
+	code := []byte{
+		0x80, 0x3D, 0x10, 0x00, 0x00, 0x00, 0x00, // cmp byte [rip+0x10], 0
+		0x48, 0x8D, 0x05, 0x20, 0x00, 0x00, 0x00, // lea rax, [rip+0x20]      -> block
+		0x4C, 0x8B, 0x15, 0x30, 0x00, 0x00, 0x00, // mov r10, [rip+0x30]      -> key
+		0x48, 0x33, 0x15, 0x40, 0x00, 0x00, 0x00, // xor rdx, [rip+0x40]      -> key
+		0x48, 0x0F, 0xC8, // bswap rax
+		0xC3, // ret
+	}
+	const base = 0x1000
+	sites := FindKdbgCopySites(code, base)
+	if len(sites) != 1 {
+		t.Fatalf("sites = %d, want 1", len(sites))
+	}
+	s := sites[0]
+	if s.FlagVA != base+7+0x10 {
+		t.Errorf("FlagVA = %#x, want %#x", s.FlagVA, base+7+0x10)
+	}
+	if len(s.Blocks) != 1 || s.Blocks[0] != base+14+0x20 {
+		t.Errorf("Blocks = %#x, want [%#x]", s.Blocks, base+14+0x20)
+	}
+	if len(s.Keys) != 2 || s.Keys[0] != base+21+0x30 || s.Keys[1] != base+28+0x40 {
+		t.Errorf("Keys = %#x, want [%#x %#x]", s.Keys, base+21+0x30, base+28+0x40)
+	}
+}
+
+func TestFindKdbgCopySitesNeedsBswap(t *testing.T) {
+	// The same shape minus the BSWAP must not qualify — the flag CMP alone is
+	// far too common in the kernel.
+	code := []byte{
+		0x80, 0x3D, 0x10, 0x00, 0x00, 0x00, 0x00,
+		0x48, 0x8D, 0x05, 0x20, 0x00, 0x00, 0x00,
+		0x4C, 0x8B, 0x15, 0x30, 0x00, 0x00, 0x00,
+		0x48, 0x33, 0x15, 0x40, 0x00, 0x00, 0x00,
+		0xC3,
+	}
+	if sites := FindKdbgCopySites(code, 0x1000); len(sites) != 0 {
+		t.Fatalf("a window without BSWAP must not qualify: %+v", sites)
+	}
+}
