@@ -52,13 +52,21 @@ func TestSignatureStoreRoundTrip(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Global != "G" || got[0].ByteOperand != true {
 		t.Fatalf("round trip = (%+v, %v)", got, err)
 	}
-	// Replace by Global, not duplicate.
-	if err := WriteSignature(dir, "ntoskrnl.exe", Signature{Name: "R2", Global: "G", Pattern: []byte{9}, Mask: []byte{0xFF}}); err != nil {
+	// The same (Global, Name) replaces in place; a different Name for the same
+	// Global is a variant and accumulates.
+	if err := WriteSignature(dir, "ntoskrnl.exe", Signature{Name: "R", Global: "G", Pattern: []byte{9}, Mask: []byte{0xFF}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = ReadSignatures(dir, "ntoskrnl.exe")
-	if len(got) != 1 || got[0].Name != "R2" {
-		t.Fatalf("replace-by-global failed: %+v", got)
+	if len(got) != 1 || len(got[0].Pattern) != 1 {
+		t.Fatalf("same-name rewrite must replace, not duplicate: %+v", got)
+	}
+	if err := WriteSignature(dir, "ntoskrnl.exe", Signature{Name: "R2", Global: "G", Pattern: []byte{7}, Mask: []byte{0xFF}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = ReadSignatures(dir, "ntoskrnl.exe")
+	if len(got) != 2 || got[0].Name != "R" || got[1].Name != "R2" {
+		t.Fatalf("a differently-named variant must accumulate, name-sorted: %+v", got)
 	}
 }
 

@@ -33,8 +33,12 @@ func ReadSignatures(dir, module string) ([]Signature, error) {
 	return sigs, nil
 }
 
-// WriteSignature adds or replaces (by Global) a signature for module in dir,
-// keeping the file sorted by Global for stable diffs, written atomically.
+// WriteSignature adds or replaces (by Global AND Name) a signature for module
+// in dir, sorted for stable diffs, written atomically. A same-global
+// signature under a different name is a VARIANT and accumulates — each build
+// that self-authors adds its own, and the applier tries every variant until
+// one passes its consume gate, so the file converges toward covering the
+// build lineages the cache has seen.
 func WriteSignature(dir, module string, sig Signature) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -45,7 +49,7 @@ func WriteSignature(dir, module string, sig Signature) error {
 	}
 	replaced := false
 	for i := range sigs {
-		if sigs[i].Global == sig.Global {
+		if sigs[i].Global == sig.Global && sigs[i].Name == sig.Name {
 			sigs[i], replaced = sig, true
 			break
 		}
@@ -53,7 +57,12 @@ func WriteSignature(dir, module string, sig Signature) error {
 	if !replaced {
 		sigs = append(sigs, sig)
 	}
-	sort.Slice(sigs, func(i, j int) bool { return sigs[i].Global < sigs[j].Global })
+	sort.Slice(sigs, func(i, j int) bool {
+		if sigs[i].Global != sigs[j].Global {
+			return sigs[i].Global < sigs[j].Global
+		}
+		return sigs[i].Name < sigs[j].Name
+	})
 
 	raw, err := json.MarshalIndent(sigs, "", "  ")
 	if err != nil {

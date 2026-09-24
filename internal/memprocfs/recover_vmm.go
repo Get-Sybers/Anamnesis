@@ -637,6 +637,12 @@ func (e *vmmEngine) authorHeadSignature(head uint64) {
 	if dir == "" {
 		return
 	}
+	// One signature per authoring build: variants accumulate in the store and
+	// the applier tries each, so lineages the cache has seen stay locatable.
+	sigName := headGlobal + ".ref"
+	if guid, age, err := e.kernelCodeView(); err == nil {
+		sigName = fmt.Sprintf("%s.ref@%s-%d", headGlobal, guid, age)
+	}
 	for _, h := range symbols.RIPTargetAll(image, base) {
 		if h.Target != head {
 			continue
@@ -646,7 +652,7 @@ func (e *vmmEngine) authorHeadSignature(head uint64) {
 			if start < 0 {
 				continue
 			}
-			sig, built := symbols.BuildSignatureAround(headGlobal+".ref", headGlobal, image[start:h.At], false)
+			sig, built := symbols.BuildSignatureAround(sigName, headGlobal, image[start:h.At], false)
 			if !built {
 				continue
 			}
