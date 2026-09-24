@@ -108,10 +108,11 @@ const kdbgCopyWindow = 0x140
 // instruction). Within that window it collects the RIP-relative LEA targets
 // and MOV/XOR load targets. False positives are expected and harmless — every
 // candidate combination is proven or discarded by the decoded block's own
-// "KDBG" tag, never trusted from the match alone.
+// "KDBG" tag, never trusted from the match alone — so the whole image is
+// scanned uncapped: a cap here would let false positives hide the real site.
 func FindKdbgCopySites(image []byte, base uint64) []KdbgCopySite {
 	var sites []KdbgCopySite
-	for p := 0; p+7 <= len(image) && len(sites) < 8; p++ {
+	for p := 0; p+7 <= len(image); p++ {
 		if image[p] != 0x80 || image[p+1] != 0x3D {
 			continue
 		}
