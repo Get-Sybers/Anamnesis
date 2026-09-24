@@ -200,6 +200,92 @@ func collectFiles(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
+// collectKeys -> windows.anamnesis.keys. Key-type handles: every registry key
+// a process holds open, as registry/access events — the per-process registry
+// surface the curated-key snapshot cannot see. One event per (process, key),
+// with the handle count and the union of granted-access bits kept raw.
+func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
+	procs, err := eng.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var recs []car.Record
+	for _, p := range procs {
+		hs, err := eng.Handles(p.PID)
+		if err != nil {
+			continue
+		}
+		type agg struct {
+			hive, key, path string // path: the first raw handle name seen
+			access          uint64
+			count           int
+		}
+		// Aggregation keys on the NORMALIZED (hive, key) so the same key seen
+		// under different name forms (annotated vs kernel) stays one event.
+		byKey := map[string]*agg{}
+		var order []string
+		for _, h := range hs {
+			if h.Type != "Key" || h.Name == "" {
+				continue
+			}
+			hive, key := splitRegistryPath(h.Name)
+			id := hive + "\x00" + key
+			if a, ok := byKey[id]; ok {
+				a.access |= h.GrantedAccess
+				a.count++
+				continue
+			}
+			byKey[id] = &agg{hive: hive, key: key, path: h.Name, access: h.GrantedAccess, count: 1}
+			order = append(order, id)
+		}
+		for _, id := range order {
+			a := byKey[id]
+			recs = append(recs, car.Record{
+				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "ProcessName": nilIfEmpty(p.Name),
+				"Hive": nilIfEmpty(a.hive), "Key": nilIfEmpty(a.key), "Path": a.path,
+				"GrantedAccess": a.access, "Handles": a.count,
+			})
+		}
+	}
+	return recs, nil
+}
+
+// splitRegistryPath maps a key-handle name onto the analyst's hive + key.
+// MemProcFS renders Key handles as "[<hive VA>:<cell>] <hive>\<path>"
+// (optionally with a leading backslash); the kernel's own
+// "\REGISTRY\MACHINE\..." / "\REGISTRY\USER\<sid>\..." forms are handled too.
+// The hive-object annotation stays in the raw Path the caller keeps.
+func splitRegistryPath(path string) (hive, key string) {
+	s := strings.TrimPrefix(path, `\`)
+	// Strip the "[va:cell] " hive-object annotation.
+	if strings.HasPrefix(s, "[") {
+		if i := strings.Index(s, "] "); i >= 0 {
+			s = s[i+2:]
+		}
+	}
+	s = strings.TrimPrefix(s, `\`)
+	const machine = `REGISTRY\MACHINE\`
+	const user = `REGISTRY\USER\`
+	switch {
+	case s == `REGISTRY\MACHINE`:
+		return "HKLM", ""
+	case s == `REGISTRY\USER`:
+		return "HKU", ""
+	case strings.HasPrefix(s, machine):
+		return "HKLM", s[len(machine):]
+	case strings.HasPrefix(s, user):
+		rest := s[len(user):]
+		if i := strings.IndexByte(rest, '\\'); i >= 0 {
+			return `HKU\` + rest[:i], rest[i+1:]
+		}
+		return `HKU\` + rest, ""
+	}
+	if i := strings.IndexByte(s, '\\'); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	return s, ""
+}
+
 // collectAccess -> windows.anamnesis.access. Process-type handles = observed
 // "A holds access to B" facts.
 func collectAccess(eng memprocfs.Engine) ([]car.Record, error) {

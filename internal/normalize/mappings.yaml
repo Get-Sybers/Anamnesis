@@ -315,6 +315,23 @@ mappings:
       user: {user_from_hive: Hive}
     keep: []
 
+  # ---- registry ACCESS events — Key handles a process holds open --------------
+  windows.anamnesis.keys:
+    object: registry
+    action: access
+    ts: null
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    # guid on the normalized identity — the raw Path carries volatile
+    # MemProcFS hive-VA/cell annotations and stays in _native only.
+    guid: {fields: [OwnerOffset, Hive, Key]}
+    props:
+      hive: Hive
+      key: Key
+      pid: PID
+      user: {user_from_hive: Hive}
+    keep: [Path, GrantedAccess, Handles, ProcessName]
+
   # A service enumerated from the SCM database snapshot is service/enumerate
   # (Byakugan's CAR model) — the snapshot asserts the service's existence and
   # recorded state, never a start/stop event.

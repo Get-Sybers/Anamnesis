@@ -18,6 +18,7 @@ default_plugins:
   - windows.svcscan
   - windows.anamnesis.threads
   - windows.anamnesis.registry
+  - windows.anamnesis.keys
   - windows.anamnesis.access
   - windows.mftscan.MFTScan
   - windows.malfind
