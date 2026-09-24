@@ -236,12 +236,10 @@ func (e *vmmEngine) recoverPrePass() {
 	}
 
 	// Function fingerprinting self-test: prove the masked-pattern scan works on
-	// THIS build's real ntoskrnl .text before it is trusted to locate a
-	// non-exported routine. Build a signature from an exported routine's own
-	// bytes, scan the module, and require the scan relocates it to exactly the
-	// address the export table gives. A failing (or non-unique) self-test
-	// leaves fingerprint recovery disabled — no non-exported global is trusted
-	// on a build where the scanner cannot prove itself.
+	// THIS build's real ntoskrnl image before it is trusted to locate a
+	// non-exported routine — harvest a signature from an exported routine's own
+	// bytes, scan the module, require a unique relocation to the export's VA.
+	// A later slice reads the result to gate fingerprinted-global recovery.
 	e.fingerprintSelfTest()
 
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
@@ -273,35 +271,36 @@ func upsertOffset(offs []symbols.RecoveredOffset, o symbols.RecoveredOffset) []s
 // disassembled offsets without being counted toward accessor completeness.
 const tokenScanFunc = "TokenScan"
 
-// kernelTextCap bounds the ntoskrnl span read for fingerprint scanning.
-const kernelTextCap = 16 << 20
+// kernelImageCap bounds the ntoskrnl span read for fingerprint scanning.
+const kernelImageCap = 16 << 20
 
-// kernelText reads the ntoskrnl module image span (base..base+ImageSize,
-// capped) for masked-pattern scanning, cached per engine. textVA is the
-// module base — a matched offset resolves to base+off.
-func (e *vmmEngine) kernelText() (text []byte, textVA uint64, ok bool) {
-	if e.kText != nil {
-		return e.kText, e.kTextVA, true
+// kernelImage reads the ntoskrnl module image span (base..base+ImageSize,
+// capped) for masked-pattern scanning, cached per engine. It reads the whole
+// mapped module, not an isolated .text section. baseVA is the module base — a
+// matched offset resolves to base+off.
+func (e *vmmEngine) kernelImage() (image []byte, baseVA uint64, ok bool) {
+	if e.kImage != nil {
+		return e.kImage, e.kImageVA, true
 	}
-	if e.kTextTried {
+	if e.kImageTried {
 		return nil, 0, false
 	}
-	e.kTextTried = true
+	e.kImageTried = true
 	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlag(0))
 	if err != nil || mod == nil || mod.BaseAddress == 0 {
 		return nil, 0, false
 	}
-	size := uint32(mod.ImageSize)
-	if size == 0 || size > kernelTextCap {
-		size = kernelTextCap
+	size := int(mod.ImageSize)
+	if size <= 0 || size > kernelImageCap {
+		size = kernelImageCap
 	}
 	// Read in chunks; a paged-out tail just shortens the scan window.
 	const chunk = 1 << 20
 	buf := make([]byte, 0, size)
-	for off := uint32(0); off < size; off += chunk {
+	for off := 0; off < size; off += chunk {
 		n := chunk
-		if off+uint32(n) > size {
-			n = int(size - off)
+		if off+n > size {
+			n = size - off
 		}
 		b, cb, rerr := e.vmm.MemReadEx(systemPID, mod.BaseAddress+uint64(off), uint32(n), mp.MemFlagNone)
 		if rerr != nil || cb == 0 {
@@ -315,44 +314,43 @@ func (e *vmmEngine) kernelText() (text []byte, textVA uint64, ok bool) {
 	if len(buf) == 0 {
 		return nil, 0, false
 	}
-	e.kText, e.kTextVA = buf, mod.BaseAddress
-	return e.kText, e.kTextVA, true
+	e.kImage, e.kImageVA = buf, mod.BaseAddress
+	return e.kImage, e.kImageVA, true
 }
 
-// fingerprintSelfTest proves the masked-pattern scanner on this build. It
-// harvests a signature from an exported routine (bytes read via the export
-// VA, the mov/lea displacement wildcarded) and requires the scan to find that
-// routine — uniquely — back at the export's own address. On success
-// fingerprint recovery is enabled for the image; otherwise it stays off.
-func (e *vmmEngine) fingerprintSelfTest() {
+// fingerprintSelfTest proves the masked-pattern scanner on this build's real
+// ntoskrnl image: it harvests a signature from an exported routine (bytes read
+// via the export VA, the trailing displacement wildcarded) and requires the
+// scan to relocate it — uniquely — to the export's own address. It reports the
+// result; a later slice reads it to gate fingerprinted-global recovery.
+func (e *vmmEngine) fingerprintSelfTest() bool {
 	const probe = "PsGetProcessId" // an exported accessor: known VA = ground truth
 	knownVA, err := e.vmm.GetProcAddress(systemPID, "ntoskrnl.exe", probe)
 	if err != nil || knownVA == 0 {
-		return
+		return false
 	}
 	code, err := e.vmm.MemRead(systemPID, knownVA, 24)
 	if err != nil || len(code) < 16 {
-		return
+		return false
 	}
-	text, textVA, ok := e.kernelText()
+	image, baseVA, ok := e.kernelImage()
 	if !ok {
-		fmt.Fprintln(os.Stderr, "[anamnesis] fingerprint self-test: ntoskrnl .text unreadable — fingerprinting disabled")
-		return
+		fmt.Fprintln(os.Stderr, "[anamnesis] fingerprint self-test: ntoskrnl image unreadable")
+		return false
 	}
 	sig := harvestSignature(probe, code)
-	// Require a UNIQUE match at the known VA: count hits, first must be it.
-	matchVA, off, found := symbols.MatchSignature(text, textVA, sig)
+	matchVA, off, found := symbols.MatchSignature(image, baseVA, sig)
 	if !found || matchVA != knownVA {
-		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test FAILED (found=%v at %#x, want %#x) — fingerprinting disabled\n", found, matchVA, knownVA)
-		return
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test FAILED (found=%v at %#x, want %#x)\n", found, matchVA, knownVA)
+		return false
 	}
 	// Uniqueness: no second match in the remainder.
-	if _, _, dup := symbols.MatchSignature(text[off+1:], textVA+uint64(off)+1, sig); dup {
-		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test: %s signature not unique — fingerprinting disabled\n", probe)
-		return
+	if _, _, dup := symbols.MatchSignature(image[off+1:], baseVA+uint64(off)+1, sig); dup {
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test: %s signature not unique\n", probe)
+		return false
 	}
-	e.fpOK = true
-	fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test passed (%s relocated uniquely to %#x) — fingerprinting enabled\n", probe, knownVA)
+	fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test passed (%s relocated uniquely to %#x)\n", probe, knownVA)
+	return true
 }
 
 // harvestSignature builds a masked signature from a routine's leading bytes:

@@ -55,10 +55,9 @@ type vmmEngine struct {
 	recObCookie    uint8
 	recObCookieOK  bool
 	recProcTypeIdx uint8 // the kernel Process object-type index (set by the gate)
-	kText          []byte
-	kTextVA        uint64
-	kTextTried     bool
-	fpOK           bool // the fingerprint scanner proved itself on this build
+	kImage         []byte
+	kImageVA       uint64
+	kImageTried    bool
 }
 
 type procRef struct {
