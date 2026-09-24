@@ -216,10 +216,12 @@ func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
 			continue
 		}
 		type agg struct {
-			hive, key string
-			access    uint64
-			count     int
+			hive, key, path string // path: the first raw handle name seen
+			access          uint64
+			count           int
 		}
+		// Aggregation keys on the NORMALIZED (hive, key) so the same key seen
+		// under different name forms (annotated vs kernel) stays one event.
 		byKey := map[string]*agg{}
 		var order []string
 		for _, h := range hs {
@@ -227,19 +229,20 @@ func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
 				continue
 			}
 			hive, key := splitRegistryPath(h.Name)
-			if a, ok := byKey[h.Name]; ok {
+			id := hive + "\x00" + key
+			if a, ok := byKey[id]; ok {
 				a.access |= h.GrantedAccess
 				a.count++
 				continue
 			}
-			byKey[h.Name] = &agg{hive: hive, key: key, access: h.GrantedAccess, count: 1}
-			order = append(order, h.Name)
+			byKey[id] = &agg{hive: hive, key: key, path: h.Name, access: h.GrantedAccess, count: 1}
+			order = append(order, id)
 		}
-		for _, name := range order {
-			a := byKey[name]
+		for _, id := range order {
+			a := byKey[id]
 			recs = append(recs, car.Record{
 				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "ProcessName": nilIfEmpty(p.Name),
-				"Hive": nilIfEmpty(a.hive), "Key": nilIfEmpty(a.key), "Path": name,
+				"Hive": nilIfEmpty(a.hive), "Key": nilIfEmpty(a.key), "Path": a.path,
 				"GrantedAccess": a.access, "Handles": a.count,
 			})
 		}
@@ -264,6 +267,10 @@ func splitRegistryPath(path string) (hive, key string) {
 	const machine = `REGISTRY\MACHINE\`
 	const user = `REGISTRY\USER\`
 	switch {
+	case s == `REGISTRY\MACHINE`:
+		return "HKLM", ""
+	case s == `REGISTRY\USER`:
+		return "HKU", ""
 	case strings.HasPrefix(s, machine):
 		return "HKLM", s[len(machine):]
 	case strings.HasPrefix(s, user):

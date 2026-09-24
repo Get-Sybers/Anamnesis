@@ -50,6 +50,7 @@ type vmmEngine struct {
 	recLinksOK     bool
 	linkedOnce     bool
 	linkedCache    map[uint32]bool
+	handleCache    map[uint32][]Handle
 	userBySID      map[string]string
 }
 
@@ -467,7 +468,13 @@ func (r *startResolver) nearestExport(m *mp.Module, va uint64) string {
 	return eat[i].FunctionName
 }
 
+// Handles caches per PID: three collectors (files, keys, process access)
+// each walk every process's handles, and the native enumeration is the
+// expensive part — one GetHandleList per process serves all of them.
 func (e *vmmEngine) Handles(pid uint32) ([]Handle, error) {
+	if hs, ok := e.handleCache[pid]; ok {
+		return hs, nil
+	}
 	hl, err := e.vmm.GetHandleList(pid)
 	if err != nil {
 		return nil, err
@@ -490,6 +497,10 @@ func (e *vmmEngine) Handles(pid uint32) ([]Handle, error) {
 		}
 		out = append(out, hd)
 	}
+	if e.handleCache == nil {
+		e.handleCache = map[uint32][]Handle{}
+	}
+	e.handleCache[pid] = out
 	return out, nil
 }
 

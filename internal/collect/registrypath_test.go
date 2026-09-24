@@ -11,6 +11,8 @@ func TestSplitRegistryPath(t *testing.T) {
 		{`[ffffd88bfd05a000:00000168] \MACHINE`, "MACHINE", ""},
 		{`\[ffffd88bfdb3a000:01ec0330] SOFTWARE\Microsoft\Windows`, "SOFTWARE", `Microsoft\Windows`},
 		{`\REGISTRY\MACHINE\SOFTWARE\Classes`, "HKLM", `SOFTWARE\Classes`},
+		{`\REGISTRY\MACHINE`, "HKLM", ""},
+		{`\REGISTRY\USER`, "HKU", ""},
 		{`\REGISTRY\USER\S-1-5-21-1-2-3-1001\Software\Vendor`, `HKU\S-1-5-21-1-2-3-1001`, `Software\Vendor`},
 		{`\REGISTRY\USER\S-1-5-18`, `HKU\S-1-5-18`, ""},
 	}

@@ -322,7 +322,9 @@ mappings:
     ts: null
     owning_pid: PID
     owning_offset: OwnerOffset
-    guid: {fields: [OwnerOffset, Path]}
+    # guid on the normalized identity — the raw Path carries volatile
+    # MemProcFS hive-VA/cell annotations and stays in _native only.
+    guid: {fields: [OwnerOffset, Hive, Key]}
     props:
       hive: Hive
       key: Key
