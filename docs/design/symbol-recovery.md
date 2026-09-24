@@ -46,6 +46,22 @@ Recovery fights two very different things, and conflating them causes bad calls:
   so it is defeated by redundancy and structural invariants, never by trusting a
   single view. Result: `heuristic`, consensus-scored.
 
+### 1.1 Relation to the Windows symbol taxonomy
+
+Windows splits symbol data in two ([public and private symbols](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/public-and-private-symbols)):
+**private** symbols carry full type layouts (struct field offsets), **public**
+symbols carry only the names and addresses of functions and globals. The
+recovery tiers rebuild both surfaces with neither present: accessor
+disassembly and PEB anchoring reconstruct the private surface (the offset
+battery), export-walking and function fingerprinting reconstruct the public
+surface (global addresses, stored as build-stable RVAs). The offline contract
+is the container-enforced form of dbghelp's
+[`SYMOPT_SECURE`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/symbol-options#symopt-secure)
+(no symbol-server or network access, ever), and as under
+[`SYMOPT_NO_PUBLICS`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/symbol-options#symopt-no-publics),
+no name→address source is consulted beyond the export table the image itself
+carries.
+
 ## 2. Tiered architecture
 
 Three tiers, descending preference. The engine tries them in order and records

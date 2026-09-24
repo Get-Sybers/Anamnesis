@@ -17,11 +17,42 @@ package symbols
 // that varies across builds). Pattern and Mask are equal length; the RIP
 // operand recovery starts at the match offset.
 type Signature struct {
-	Name        string // the routine, for logs (not resolvable by export)
-	Global      string // the global the match site references
-	Pattern     []byte
-	Mask        []byte
-	ByteOperand bool // prefer the byte-sized RIP reference (movzx/mov r8)
+	Name        string `json:"name"`   // the routine, for logs (not resolvable by export)
+	Global      string `json:"global"` // the global the match site references
+	Pattern     []byte `json:"pattern"`
+	Mask        []byte `json:"mask"`
+	ByteOperand bool   `json:"byte_operand"` // prefer the byte-sized RIP reference (movzx/mov r8)
+}
+
+// BuildSignature derives a masked signature from a routine's leading bytes:
+// it locates the routine's first RIP-relative operand (the reference to the
+// named global), pins the whole window up to and including that instruction,
+// and wildcards exactly the disp32 — the four bytes that move with the global
+// across builds. This is what makes a harvested signature generalize: the code
+// shape is pinned, the build-specific address is not. ok=false when no RIP
+// operand is found in the window (nothing build-portable to key on).
+func BuildSignature(name, global string, code []byte, byteOperand bool) (Signature, bool) {
+	for _, h := range RIPTargetAll(code, 0) {
+		if byteOperand && !h.Byte {
+			continue
+		}
+		// h.At is the offset just past the instruction; the disp32 is the 4
+		// bytes immediately before it.
+		dispStart := h.At - 4
+		if dispStart < 0 || h.At > len(code) {
+			continue
+		}
+		pat := append([]byte(nil), code[:h.At]...)
+		mask := make([]byte, h.At)
+		for i := range mask {
+			mask[i] = 0xFF
+		}
+		for i := dispStart; i < h.At; i++ {
+			mask[i] = 0x00 // wildcard the RIP displacement
+		}
+		return Signature{Name: name, Global: global, Pattern: pat, Mask: mask, ByteOperand: byteOperand}, true
+	}
+	return Signature{}, false
 }
 
 // MatchSignature returns the VA and offset of the first place in text where

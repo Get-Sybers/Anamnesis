@@ -58,6 +58,7 @@ type vmmEngine struct {
 	kImage         []byte
 	kImageVA       uint64
 	kImageTried    bool
+	fpOK           bool // the fingerprint scanner proved itself on this build
 }
 
 type procRef struct {

@@ -223,6 +223,20 @@ func (e *vmmEngine) recoverPrePass() {
 		}
 	}
 
+	// Function fingerprinting: prove the masked-pattern scan on THIS build's
+	// real ntoskrnl image (self-test against exported ground truth), then
+	// recover the VAs of globals whose reading routines are not exported from
+	// the shipped signatures. Only a passing self-test enables it; the
+	// recovered VAs cache in the store like the cookie. The ground-truth
+	// cross-check confirms a fingerprinted global equals its exported-path VA.
+	e.fpOK = e.fingerprintSelfTest()
+	if e.fpOK {
+		e.fingerprintGroundTruth()
+		if e.applyShippedSignatures(entry) {
+			dirty = true
+		}
+	}
+
 	if dirty && len(entry.Offsets) > 0 {
 		if dir := e.writableStoreDir(); dir != "" {
 			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
@@ -234,13 +248,6 @@ func (e *vmmEngine) recoverPrePass() {
 	if haveCookieVA {
 		e.gateObCookie(cookieVA)
 	}
-
-	// Function fingerprinting self-test: prove the masked-pattern scan works on
-	// THIS build's real ntoskrnl image before it is trusted to locate a
-	// non-exported routine — harvest a signature from an exported routine's own
-	// bytes, scan the module, require a unique relocation to the export's VA.
-	// A later slice reads the result to gate fingerprinted-global recovery.
-	e.fingerprintSelfTest()
 
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
 		// Gate on EVERY load, store hits included: the offset must decode the
@@ -351,6 +358,94 @@ func (e *vmmEngine) fingerprintSelfTest() bool {
 	}
 	fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test passed (%s relocated uniquely to %#x)\n", probe, knownVA)
 	return true
+}
+
+// fingerprintGroundTruth cross-checks the whole harvest→apply path against a
+// known answer: it harvests a signature from the EXPORTED ObGetObjectType at
+// runtime, locates it by pattern in the image, RIPTargets ObHeaderCookie, and
+// requires the result to equal the VA the exported path already recovers. It
+// proves that locating a routine by pattern (what a non-exported target needs)
+// yields the same global as resolving it by export.
+func (e *vmmEngine) fingerprintGroundTruth() {
+	va, err := e.vmm.GetProcAddress(systemPID, "ntoskrnl.exe", "ObGetObjectType")
+	if err != nil || va == 0 {
+		return
+	}
+	code, err := e.vmm.MemRead(systemPID, va, 96)
+	if err != nil || len(code) < 32 {
+		return
+	}
+	sig, ok := symbols.BuildSignature("ObGetObjectType", "ObHeaderCookie", code, true)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "[anamnesis] fingerprint ground-truth: no RIP operand in ObGetObjectType")
+		return
+	}
+	image, base, ok := e.kernelImage()
+	if !ok {
+		return
+	}
+	fpVA, fpOK := symbols.RecoverGlobalByFingerprint(image, base, sig)
+	expVA, expOK := symbols.RecoverGlobalVA(kernelCode{e.vmm}, symbols.KernelGlobals[0])
+	switch {
+	case fpOK && expOK && fpVA == expVA:
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint ground-truth OK: ObHeaderCookie via pattern == exported path (%#x)\n", fpVA)
+	case fpOK && expOK:
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint ground-truth MISMATCH (pattern=%#x exported=%#x)\n", fpVA, expVA)
+	default:
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint ground-truth inconclusive (pattern ok=%v, exported ok=%v)\n", fpOK, expOK)
+	}
+}
+
+// sigDirs lists where shipped fingerprint signatures are read from: the
+// read-only baked seed dir (ANAMNESIS_SIG_DIR, default /opt/anamnesis/
+// seed-signatures). Signatures generalize across builds, so they are not
+// per-(GUID,age) and are never written at runtime.
+func (e *vmmEngine) sigDirs() []string {
+	dir := os.Getenv("ANAMNESIS_SIG_DIR")
+	if dir == "" {
+		dir = "/opt/anamnesis/seed-signatures"
+	}
+	return []string{dir}
+}
+
+// applyShippedSignatures locates each shipped signature's global by pattern
+// and caches its VA in the store (per build, like the cookie). A global whose
+// VA is already in the entry is left alone (build-stable, seedable). Returns
+// whether the entry gained a global. Each recovered VA must be a canonical
+// kernel pointer — the minimal sanity gate for a global address; richer
+// per-global consume gates arrive with the transforms that use them.
+func (e *vmmEngine) applyShippedSignatures(entry *symbols.StoreEntry) bool {
+	image, base, ok := e.kernelImage()
+	if !ok {
+		return false
+	}
+	var sigs []symbols.Signature
+	for _, dir := range e.sigDirs() {
+		s, err := symbols.ReadSignatures(dir, "ntoskrnl.exe")
+		if err != nil {
+			// A missing file is nil,nil — any error is a broken shipped file,
+			// which must be visible, not a silent fingerprinting no-op.
+			fmt.Fprintf(os.Stderr, "[anamnesis] signature store %s unreadable: %v\n", dir, err)
+			continue
+		}
+		sigs = append(sigs, s...)
+	}
+	dirty := false
+	for _, sig := range sigs {
+		if _, have := entry.Global(sig.Global); have {
+			continue
+		}
+		va, found := symbols.RecoverGlobalByFingerprint(image, base, sig)
+		if !found || va < kernelVAFloor {
+			fmt.Fprintf(os.Stderr, "[anamnesis] signature %s (%s) did not locate a canonical global — skipped\n", sig.Name, sig.Global)
+			continue
+		}
+		if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: sig.Global, VA: va, Confidence: symbols.BestEffort}) {
+			dirty = true
+			fmt.Fprintf(os.Stderr, "[anamnesis] fingerprinted %s -> %s VA %#x\n", sig.Name, sig.Global, va)
+		}
+	}
+	return dirty
 }
 
 // harvestSignature builds a masked signature from a routine's leading bytes:

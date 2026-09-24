@@ -235,15 +235,18 @@ func WriteStoredOffsets(dir string, entry StoreEntry) error {
 // outside [a-z0-9._-] folded to '_' so a hostile module name cannot escape
 // the store directory.
 func storeFileName(key StoreKey) string {
-	clean := func(s string) string {
-		return strings.Map(func(r rune) rune {
-			switch {
-			case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-				return r
-			default:
-				return '_'
-			}
-		}, strings.ToLower(s))
-	}
-	return fmt.Sprintf("%s-%s-%d.json", clean(key.Module), clean(key.GUID), key.Age)
+	return fmt.Sprintf("%s-%s-%d.json", cleanStoreName(key.Module), cleanStoreName(key.GUID), key.Age)
+}
+
+// cleanStoreName folds a name to [a-z0-9._-], anything else to '_', so a
+// hostile module/guid string cannot escape the store directory.
+func cleanStoreName(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '_'
+		}
+	}, strings.ToLower(s))
 }
