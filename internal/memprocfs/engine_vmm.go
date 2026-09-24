@@ -643,7 +643,15 @@ func (e *vmmEngine) Malfind() ([]MalRegion, error) {
 				continue // no execute bit in the VAD protection index
 			}
 			buf, cb, rerr := e.vmm.MemReadEx(p.PID, v.Start, previewLen, mp.MemFlagNone)
-			if rerr != nil || cb == 0 || allZero(buf) {
+			if rerr != nil || cb == 0 {
+				continue
+			}
+			// Only the cb bytes actually read count — the slice may run past
+			// them (vmmReader.ReadVirtual trims the same way).
+			if uint32(len(buf)) > cb {
+				buf = buf[:cb]
+			}
+			if allZero(buf) {
 				continue
 			}
 			out = append(out, MalRegion{
