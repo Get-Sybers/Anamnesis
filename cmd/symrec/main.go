@@ -24,7 +24,11 @@ import (
 )
 
 func main() {
-	if len(os.Args) >= 3 && os.Args[1] == "-store" {
+	if len(os.Args) >= 2 && os.Args[1] == "-store" {
+		if len(os.Args) < 4 { // -store needs a dir AND at least one PE
+			fmt.Fprintln(os.Stderr, "usage: symrec <ntoskrnl.exe>  |  symrec -store <dir> <pe>...")
+			os.Exit(2)
+		}
 		os.Exit(seed(os.Args[2], os.Args[3:]))
 	}
 	if len(os.Args) < 2 {
@@ -94,8 +98,17 @@ func seedOne(dir, path string) error {
 	}
 	key := symbols.StoreKey{Module: "ntoskrnl.exe", GUID: guid, Age: age}
 	base, _ := symbols.ReadStoredOffsets(dir, key)
-	entry, _ := symbols.Merge(base, key, offsets, undecodable, time.Now().UTC().Format(time.RFC3339))
-	entry.Source = "genstore"
+	entry, improved := symbols.Merge(base, key, offsets, undecodable, time.Now().UTC().Format(time.RFC3339))
+	if base == nil {
+		entry.Source = "genstore" // a merge keeps the existing entry's provenance
+	}
+	if !improved {
+		// Re-seeding an unchanged build must not rewrite the file: the store
+		// stays deterministic and diffs stay quiet.
+		fmt.Fprintf(os.Stderr, "symrec: %s already complete (guid=%s age=%d) — not rewritten\n",
+			key.Module, guid, age)
+		return nil
+	}
 	if err := symbols.WriteStoredOffsets(dir, *entry); err != nil {
 		return err
 	}

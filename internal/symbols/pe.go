@@ -83,17 +83,22 @@ func newPEImage(f *pe.File) (*PEImage, error) {
 }
 
 // readAtRVA returns n bytes at a relative virtual address, or as many as are
-// file-backed if the section is shorter.
+// file-backed if the section is shorter. All arithmetic is wrap-safe: a
+// hostile header cannot steer off+n past uint32 and panic the slice.
 func (p *PEImage) readAtRVA(rva, n uint32) ([]byte, bool) {
 	for _, s := range p.sections {
-		if rva >= s.va && rva < s.va+s.size {
-			off := rva - s.va
-			end := off + n
-			if end > uint32(len(s.data)) {
-				end = uint32(len(s.data))
-			}
-			return s.data[off:end], true
+		if rva < s.va || rva-s.va >= s.size {
+			continue
 		}
+		off := rva - s.va
+		end := off + n
+		if end < off || end > uint32(len(s.data)) { // overflow or past the data
+			end = uint32(len(s.data))
+		}
+		if off > end {
+			return nil, false
+		}
+		return s.data[off:end], true
 	}
 	return nil, false
 }
@@ -185,7 +190,13 @@ func (p *PEImage) CodeView() (guid string, age uint32, err error) {
 		return "", 0, fmt.Errorf("no debug directory")
 	}
 	const entrySize = 28 // IMAGE_DEBUG_DIRECTORY
-	dir, ok := p.readAtRVA(p.debugRVA, p.debugSize)
+	// Header-supplied sizes are hostile input: a debug directory is a handful
+	// of entries and an RSDS record is 24 bytes + a PDB path — cap both.
+	dirSize := p.debugSize
+	if dirSize > 4096 {
+		dirSize = 4096
+	}
+	dir, ok := p.readAtRVA(p.debugRVA, dirSize)
 	if !ok || len(dir) < entrySize {
 		return "", 0, fmt.Errorf("debug directory not readable")
 	}
@@ -198,6 +209,9 @@ func (p *PEImage) CodeView() (guid string, age uint32, err error) {
 		rva := binary.LittleEndian.Uint32(e[20:])
 		if rva == 0 || size < 24 {
 			continue
+		}
+		if size > 1024 {
+			size = 1024
 		}
 		rec, ok := p.readAtRVA(rva, size)
 		if !ok || len(rec) < 24 || string(rec[:4]) != "RSDS" {
