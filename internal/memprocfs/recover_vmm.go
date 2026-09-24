@@ -744,11 +744,15 @@ func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
 			from = off + 4
 		}
 	}
-	// Encoded case: decode with the wait keys when a signature has populated
-	// all four inputs. Inert until that signature ships; the gate keeps a
-	// wrong decode from ever being consumed.
+	// Encoded case, stored inputs first: decode with the wait keys when an
+	// earlier sighting cached all four (per-boot key VALUES are re-read live).
 	if e.decodeStoredKdbg(entry, base, size) {
-		return false // the block RVA was already stored
+		return false // the four input RVAs were already stored
+	}
+	// Encoded case, first sighting: recover the inputs keyless from the
+	// kernel's own decoder routine, decode, and cache them.
+	if dirty := e.recoverKdbgKeys(entry, base, size); e.recKdbgOK {
+		return dirty
 	}
 	switch {
 	case !imgOK:
@@ -756,9 +760,86 @@ func (e *vmmEngine) recoverKdbg(entry *symbols.StoreEntry) bool {
 	case sawRejected:
 		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: a \"KDBG\" tag was found but failed the plausibility/head gate")
 	default:
-		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: no unencoded block; the encoded decode needs the wait-key signature")
+		fmt.Fprintln(os.Stderr, "[anamnesis] KdDebuggerDataBlock not recovered: no unencoded block, and no KdCopyDataBlock site yielded a decode that passed the tag gate")
 	}
 	return false
+}
+
+// recoverKdbgKeys recovers the encoded-KDBG inputs with no keys and no
+// signature, from the kernel's own decoder: KdCopyDataBlock is found by its
+// KdpDataBlockEncoded flag test plus the transform's BSWAP, and its
+// RIP-relative operands name the flag, the block, and the two wait keys. The
+// two keys arrive unordered and the transform is asymmetric, so both
+// assignments are tried — only the one whose decode recovers the "KDBG" tag
+// (and passes the head cross-check) is consumed, and all four inputs then
+// cache in the store as RVAs. Returns whether the store gained globals.
+func (e *vmmEngine) recoverKdbgKeys(entry *symbols.StoreEntry, base, size uint64) bool {
+	image, imgBase, ok := e.kernelImage()
+	if !ok {
+		return false
+	}
+	inSpan := func(va uint64) bool { return va > base && va-base < size }
+	for _, site := range symbols.FindKdbgCopySites(image, imgBase) {
+		if !inSpan(site.FlagVA) {
+			continue
+		}
+		// The kernel's own flag says whether the block is encoded at all; a
+		// decoded-in-place block was already consumed by the scan above.
+		if flag, ok := e.readByte(site.FlagVA); !ok || flag != 1 {
+			continue
+		}
+		for _, blockVA := range site.Blocks {
+			if !inSpan(blockVA) {
+				continue
+			}
+			enc, err := e.vmm.MemRead(systemPID, blockVA, kdbgReadLen)
+			if err != nil || symbols.KdbgTagOK(enc) {
+				continue // unreadable, or plaintext (the scan path's case)
+			}
+			for i, kn := range site.Keys {
+				for j, ka := range site.Keys {
+					if i == j || !inSpan(kn) || !inSpan(ka) {
+						continue
+					}
+					never, ok1 := e.readQword(kn)
+					always, ok2 := e.readQword(ka)
+					if !ok1 || !ok2 {
+						continue
+					}
+					dec := symbols.DecodeKdbg(enc, never, always, site.FlagVA)
+					if !symbols.KdbgTagOK(dec) || !e.acceptKdbg(blockVA, dec, true) {
+						continue
+					}
+					fmt.Fprintf(os.Stderr, "[anamnesis] recovered the KDBG wait keys from KdCopyDataBlock (keyless, in-image): KiWaitNever RVA %#x, KiWaitAlways RVA %#x\n", kn-base, ka-base)
+					dirty := false
+					for _, g := range []struct {
+						name string
+						va   uint64
+					}{
+						{kdbgBlockGlobal, blockVA},
+						{kiWaitNeverGlobal, kn},
+						{kiWaitAlwaysGlobal, ka},
+						{kdpEncodedGlobal, site.FlagVA},
+					} {
+						if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: g.name, RVA: g.va - base, Confidence: symbols.BestEffort}) {
+							dirty = true
+						}
+					}
+					return dirty
+				}
+			}
+		}
+	}
+	return false
+}
+
+// readByte reads one byte from memory.
+func (e *vmmEngine) readByte(va uint64) (byte, bool) {
+	b, err := e.vmm.MemRead(systemPID, va, 1)
+	if err != nil || len(b) < 1 {
+		return 0, false
+	}
+	return b[0], true
 }
 
 // readAndAcceptKdbg reads the block at blockVA from memory and validates it.
