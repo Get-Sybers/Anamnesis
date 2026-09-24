@@ -100,7 +100,7 @@ mappings:
       stack_limit: StackLimit
       user_stack_base: UserStackBase
       user_stack_limit: UserStackLimit
-    keep: [ExitTime, StartAddress, StartPath, StartFunction]
+    keep: [ExitTime, StartAddress, StartPath, StartFunction, Unbacked]
 
   windows.anamnesis.modules:
     object: module
@@ -114,7 +114,7 @@ mappings:
       module_name: Name
       base_address: Base
       pid: PID
-    keep: [Size, LoadCount, ProcessName]
+    keep: [Size, LoadCount, ProcessName, Company, Description, Version]
 
   windows.anamnesis.network:
     variants:
@@ -129,11 +129,13 @@ mappings:
           props:
             local_address: LocalAddr
             local_port: LocalPort
+            remote_address: ForeignAddr
+            remote_port: ForeignPort
             protocol: {transport: Proto}
             family: {family: Proto}
             pid: PID
             success: {const: true}
-          keep: [State, Offset, Owner, ForeignAddr, ForeignPort]
+          keep: [State, Offset, Owner]
     default:
       object: flow
       action: start
@@ -222,7 +224,7 @@ mappings:
       image_path: Path
       module_name: Name
       base_address: Base
-    keep: [Size]
+    keep: [Size, ServiceKey]
 
   # &socket / &flow define the shared bound-socket + connection shapes once;
   # netstat reuses them by alias. (anamnesis.network above adds OwnerOffset, so it is
@@ -239,11 +241,13 @@ mappings:
           props:
             local_address: LocalAddr
             local_port: LocalPort
+            remote_address: ForeignAddr
+            remote_port: ForeignPort
             protocol: {transport: Proto}
             family: {family: Proto}
             pid: PID
             success: {const: true}
-          keep: [State, Offset, Owner, ForeignAddr, ForeignPort]
+          keep: [State, Offset, Owner]
     default: &flow
       object: flow
       action: start
@@ -307,8 +311,9 @@ mappings:
       image_path: {exe_path: {first: [Binary, "Binary (Registry)"]}}
       exe: {basename: {exe_path: {first: [Binary, "Binary (Registry)"]}}}
       command_line: "Binary (Registry)"
+      user: UserAccount
       pid: PID
-    keep: [Order, Start, State, Type, Display, Dll]
+    keep: [Order, Start, State, Type, Display, Dll, UserType]
 
   windows.sessions:
     object: user_session

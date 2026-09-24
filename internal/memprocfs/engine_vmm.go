@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -364,16 +365,20 @@ func (e *vmmEngine) createTime(pid uint32, eprocess uint64) string {
 // --- spokes ------------------------------------------------------------------
 
 func (e *vmmEngine) Modules(pid uint32) ([]Module, error) {
-	ml, err := e.vmm.GetModuleList(pid, mp.ModuleFlag(0))
+	ml, err := e.vmm.GetModuleList(pid, mp.ModuleFlagVersionInfo)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Module, 0, len(ml.Modules))
 	for _, m := range ml.Modules {
-		out = append(out, Module{
+		mod := Module{
 			Base: m.BaseAddress, Size: uint64(m.ImageSize), Name: m.Name, Path: m.FullName,
 			// TODO(on-target): MemProcFS's module map carries no load time — left "".
-		})
+		}
+		if m.VersionInfo != nil {
+			mod.Company, mod.Descr, mod.Version = m.VersionInfo.CompanyName, m.VersionInfo.FileDescription, m.VersionInfo.FileVersion
+		}
+		out = append(out, mod)
 	}
 	return out, nil
 }
@@ -383,18 +388,83 @@ func (e *vmmEngine) Threads(pid uint32) ([]Thread, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The start addresses resolve against the process's own module map; the
+	// start function is the nearest preceding export of the containing module
+	// (in-memory EAT — no PDB). A Win32 start address inside no module is the
+	// injected-code signal, surfaced as Unbacked.
+	res := e.startResolver(pid)
 	out := make([]Thread, 0, len(tl.Threads))
 	for _, t := range tl.Threads {
-		out = append(out, Thread{
+		th := Thread{
 			TID: t.TID, ETHREAD: t.ETHREAD,
 			CreateTime: fileTimeToISO(t.CreateTime), ExitTime: fileTimeToISO(t.ExitTime),
 			Win32StartAddress: t.Win32StartAddress, StartAddress: t.StartAddress,
 			StackBase: t.StackBaseKernel, StackLimit: t.StackLimitKernel,
 			UserStackBase: t.StackBaseUser, UserStackLimit: t.StackLimitUser,
-			// TODO(on-target): resolve Win32StartPath/Function from the module map + PDBs.
-		})
+		}
+		if res != nil {
+			var backed bool
+			th.Win32StartPath, th.Win32StartFunction, backed = res.resolve(t.Win32StartAddress)
+			th.StartPath, th.StartFunction, _ = res.resolve(t.StartAddress)
+			th.Unbacked = t.Win32StartAddress != 0 && !backed
+		}
+		out = append(out, th)
 	}
 	return out, nil
+}
+
+// startResolver indexes a process's modules (and, lazily, their in-memory
+// export tables) so thread start addresses resolve to a module path and the
+// nearest preceding export — no PDB involved.
+type startResolver struct {
+	e    *vmmEngine
+	pid  uint32
+	mods []mp.Module
+	eats map[string][]mp.EatEntry
+}
+
+func (e *vmmEngine) startResolver(pid uint32) *startResolver {
+	ml, err := e.vmm.GetModuleList(pid, mp.ModuleFlag(0))
+	if err != nil || ml == nil || len(ml.Modules) == 0 {
+		return nil
+	}
+	mods := append([]mp.Module(nil), ml.Modules...)
+	sort.Slice(mods, func(i, j int) bool { return mods[i].BaseAddress < mods[j].BaseAddress })
+	return &startResolver{e: e, pid: pid, mods: mods, eats: map[string][]mp.EatEntry{}}
+}
+
+// resolve returns the containing module's path, the nearest preceding export
+// (as name or name+0x<distance>), and whether the address sat inside any
+// module at all.
+func (r *startResolver) resolve(va uint64) (path, function string, backed bool) {
+	if va == 0 {
+		return "", "", false
+	}
+	i := sort.Search(len(r.mods), func(i int) bool { return r.mods[i].BaseAddress > va }) - 1
+	if i < 0 || va >= r.mods[i].BaseAddress+uint64(r.mods[i].ImageSize) {
+		return "", "", false
+	}
+	m := &r.mods[i]
+	return m.FullName, r.nearestExport(m, va), true
+}
+
+func (r *startResolver) nearestExport(m *mp.Module, va uint64) string {
+	eat, ok := r.eats[m.Name]
+	if !ok {
+		if el, err := r.e.vmm.GetEatList(r.pid, m.Name); err == nil && el != nil {
+			eat = append([]mp.EatEntry(nil), el.Entries...)
+			sort.Slice(eat, func(i, j int) bool { return eat[i].FunctionAddress < eat[j].FunctionAddress })
+		}
+		r.eats[m.Name] = eat // a failed fetch caches as empty
+	}
+	i := sort.Search(len(eat), func(i int) bool { return eat[i].FunctionAddress > va }) - 1
+	if i < 0 || eat[i].FunctionAddress == 0 || eat[i].FunctionName == "" {
+		return ""
+	}
+	if off := va - eat[i].FunctionAddress; off != 0 {
+		return fmt.Sprintf("%s+0x%x", eat[i].FunctionName, off)
+	}
+	return eat[i].FunctionName
 }
 
 func (e *vmmEngine) Handles(pid uint32) ([]Handle, error) {
@@ -470,6 +540,7 @@ func (e *vmmEngine) Services() ([]Service, error) {
 			Binary: s.ImagePath, BinaryRegistry: s.Path,
 			State: svcState(s.Status.CurrentState), Type: svcType(s.Status.ServiceType),
 			Start: svcStart(s.StartType), Display: s.DisplayName, Order: int(s.Ordinal),
+			User: s.UserAccount, UserType: s.UserType,
 		})
 	}
 	return out, nil
@@ -483,7 +554,8 @@ func (e *vmmEngine) Drivers() ([]Driver, error) {
 	out := make([]Driver, 0, len(dl.Entries))
 	for _, d := range dl.Entries {
 		out = append(out, Driver{Offset: d.Va, Name: d.Name, Path: d.Path,
-			Base: d.VaDriverStart, Size: d.CbDriverSize})
+			Base: d.VaDriverStart, Size: d.CbDriverSize,
+			ServiceKey: d.ServiceKeyName})
 	}
 	return out, nil
 }

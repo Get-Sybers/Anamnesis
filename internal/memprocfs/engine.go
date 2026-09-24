@@ -57,6 +57,9 @@ type Module struct {
 	Path      string
 	LoadTime  string
 	LoadCount int
+	Company   string // PE VersionInfo CompanyName (file metadata, not the Authenticode signer)
+	Descr     string // PE VersionInfo FileDescription
+	Version   string // PE VersionInfo FileVersion
 }
 
 // Thread is one thread (GetThreadList + callstack).
@@ -75,6 +78,9 @@ type Thread struct {
 	StackLimit         uint64
 	UserStackBase      uint64
 	UserStackLimit     uint64
+	// Unbacked: the thread's Win32 start address lies inside no loaded
+	// module — the classic injected-code signal.
+	Unbacked bool
 }
 
 // Handle is one kernel handle held by a process (GetHandleList). For File handles
@@ -111,6 +117,8 @@ type Service struct {
 	PID            uint32
 	Binary         string // running ImagePath (null when stopped)
 	BinaryRegistry string // registry ImagePath (incl. arguments)
+	User           string // the configured service account (ObjectName)
+	UserType       string
 	State          string
 	Type           string
 	Start          string
@@ -121,11 +129,12 @@ type Service struct {
 
 // Driver is one kernel driver (GetKDriverList).
 type Driver struct {
-	Offset uint64
-	Name   string
-	Path   string
-	Base   uint64
-	Size   uint64
+	Offset     uint64
+	Name       string
+	Path       string
+	Base       uint64
+	Size       uint64
+	ServiceKey string // the service registry key the driver loaded under
 }
 
 // RegValue is one registry value under a curated key.
