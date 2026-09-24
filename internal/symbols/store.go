@@ -35,10 +35,31 @@ type StoreEntry struct {
 	GUID        string            `json:"guid"`
 	Age         uint32            `json:"age"`
 	Offsets     []RecoveredOffset `json:"offsets"`
+	Globals     []RecoveredGlobal `json:"globals,omitempty"`     // build-keyed kernel-global addresses (§7)
 	Undecodable []string          `json:"undecodable,omitempty"` // accessor funcs whose shape carries no offset — permanent for this build
 	Source      string            `json:"source"`                // "accessor" today; other tiers later
 	Created     string            `json:"created"`               // RFC3339 UTC, first write
 	Updated     string            `json:"updated,omitempty"`     // RFC3339 UTC, last convergence write
+}
+
+// RecoveredGlobal is a kernel global's virtual address, recovered keyless from
+// a routine that references it. Only the VA is build-stable and cached; a
+// value like ObHeaderCookie is per-boot random, so it is re-read and re-gated
+// from each image rather than trusted from the store.
+type RecoveredGlobal struct {
+	Name       string     `json:"name"`
+	VA         uint64     `json:"va"`
+	Confidence Confidence `json:"confidence"`
+}
+
+// Global returns the recovered VA for a named global.
+func (e *StoreEntry) Global(name string) (uint64, bool) {
+	for _, g := range e.Globals {
+		if g.Name == name {
+			return g.VA, true
+		}
+	}
+	return 0, false
 }
 
 // Offset returns the recovered offset for an accessor func.
@@ -111,7 +132,26 @@ func Merge(base *StoreEntry, key StoreKey, offsets []RecoveredOffset, undecodabl
 		Offsets: sortedOffsets(byFunc), Undecodable: sortedKeys(undec),
 		Source: source, Created: created, Updated: now,
 	}
+	if base != nil { // globals are carried through convergence; MergeGlobal adds them
+		out.Globals = base.Globals
+	}
 	return out, improved
+}
+
+// MergeGlobal folds a recovered global into an entry, returning whether it
+// added one (base wins on a name conflict — a seeded/persisted VA stays
+// authoritative). Globals share the (GUID, age) entry with offsets (§11) and
+// stay name-sorted, so the on-disk file is deterministic regardless of
+// recovery order.
+func MergeGlobal(e *StoreEntry, g RecoveredGlobal) bool {
+	for _, existing := range e.Globals {
+		if existing.Name == g.Name {
+			return false
+		}
+	}
+	e.Globals = append(e.Globals, g)
+	sort.Slice(e.Globals, func(i, j int) bool { return e.Globals[i].Name < e.Globals[j].Name })
+	return true
 }
 
 func sortedOffsets(m map[string]RecoveredOffset) []RecoveredOffset {

@@ -231,11 +231,20 @@ func (p *PEImage) CodeView() (guid string, age uint32, err error) {
 // FunctionCode implements CodeSource: it returns a leading window of an exported
 // function's bytes and the function's virtual address (ImageBase + RVA).
 func (p *PEImage) FunctionCode(name string) ([]byte, uint64, error) {
+	return p.FunctionCodeN(name, codeWindow)
+}
+
+// FunctionCodeN returns up to n leading bytes — the wider window global
+// recovery needs (the referencing instruction can sit into the body).
+func (p *PEImage) FunctionCodeN(name string, n int) ([]byte, uint64, error) {
+	if n <= 0 {
+		return nil, 0, fmt.Errorf("invalid code window %d", n)
+	}
 	rva, ok := p.exports[name]
 	if !ok {
 		return nil, 0, fmt.Errorf("export %q not found", name)
 	}
-	code, ok := p.readAtRVA(rva, codeWindow)
+	code, ok := p.readAtRVA(rva, uint32(n))
 	if !ok || len(code) == 0 {
 		return nil, 0, fmt.Errorf("code for %q not readable at rva %#x", name, rva)
 	}
