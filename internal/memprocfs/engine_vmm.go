@@ -240,12 +240,12 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	}
 	// Independent DKOM-resistant confirmation: a pool-tag scan for process
 	// objects, typed via the recovered ObHeaderCookie and cross-checked against
-	// this enumerated set. Opt-in (ANAMNESIS_POOLSCAN): the underlying
-	// MemProcFS pool map (GetPoolList) can deadlock on some crash-dump images,
-	// which would take the whole collector down through the watchdog, so it
-	// stays off the default lane until a deadlock-safe enumeration lands. Where
-	// enabled, it is evidence (logged); pool-only candidates are the seed of a
-	// future hidden-process surface.
+	// this enumerated set. Default-on (ANAMNESIS_POOLSCAN=0 switches it off):
+	// the enumeration is the engine's own bounded sweep — never the MemProcFS
+	// pool map (GetPoolList), which deadlocks on some crash-dump images — so
+	// every read is bounded and there is no stall lane to keep off. The scan
+	// is evidence (logged); pool-only candidates are the seed of a future
+	// hidden-process surface.
 	if poolScanEnabled() {
 		e.poolScanProcesses()
 	}
@@ -253,15 +253,34 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	return out, nil
 }
 
-// poolScanEnabled reports whether ANAMNESIS_POOLSCAN opts in to the pool-tag
-// scan, parsed as a real toggle so an explicit "0"/"false" from automation
-// stays off (matching the batch runner's env-bool convention).
+// poolScanEnabled reports whether the pool-tag scan runs: on by default,
+// with ANAMNESIS_POOLSCAN kept as an explicit off-switch ("0"/"false"/
+// "no"/"off", matching the batch runner's env-bool convention). Anything
+// else — including unset and the old opt-in "1" — runs the scan.
 func poolScanEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("ANAMNESIS_POOLSCAN"))) {
-	case "1", "true", "yes", "on":
-		return true
+	case "0", "false", "no", "off":
+		return false
 	}
-	return false
+	return true
+}
+
+// poolScanBudget reads ANAMNESIS_POOLSCAN_BUDGET (a Go duration; 0 sweeps
+// without a time limit) — the wall-clock the pool-tag sweep may spend before
+// it stops with loudly-reported partial coverage. The default keeps the scan
+// comfortably inside the 5-minute stall watchdog: the sweep's reads are
+// byte-bounded but their duration depends on the image's I/O behaviour.
+func poolScanBudget() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ANAMNESIS_POOLSCAN_BUDGET"))
+	if raw == "" {
+		return 2 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ignoring invalid ANAMNESIS_POOLSCAN_BUDGET %q\n", raw)
+		return 2 * time.Minute
+	}
+	return d
 }
 
 // exitTimeISO reads _EPROCESS.ExitTime — adjacent to CreateTime on every
