@@ -80,6 +80,7 @@ func collectThreads(eng memprocfs.Engine) ([]car.Record, error) {
 				"StartFunction": nilIfEmpty(t.StartFunction),
 				"StackBase":     t.StackBase, "StackLimit": t.StackLimit,
 				"UserStackBase": t.UserStackBase, "UserStackLimit": t.UserStackLimit,
+				"Unbacked": t.Unbacked,
 			})
 		}
 	}
@@ -104,6 +105,8 @@ func collectModules(eng memprocfs.Engine) ([]car.Record, error) {
 				"Name": nilIfEmpty(m.Name), "Path": nilIfEmpty(m.Path),
 				"LoadTime": nilIfEmpty(m.LoadTime), "Size": m.Size,
 				"LoadCount": m.LoadCount, "ProcessName": nilIfEmpty(p.Name),
+				"Company": nilIfEmpty(m.Company), "Description": nilIfEmpty(m.Descr),
+				"Version": nilIfEmpty(m.Version),
 			})
 		}
 	}
@@ -234,6 +237,7 @@ func collectServices(eng memprocfs.Engine) ([]car.Record, error) {
 			"Binary": nilIfEmpty(s.Binary), "Binary (Registry)": nilIfEmpty(s.BinaryRegistry),
 			"Order": s.Order, "Start": nilIfEmpty(s.Start), "State": nilIfEmpty(s.State),
 			"Type": nilIfEmpty(s.Type), "Display": nilIfEmpty(s.Display), "Dll": nilIfEmpty(s.Dll),
+			"UserAccount": nilIfEmpty(s.User), "UserType": nilIfEmpty(s.UserType),
 		})
 	}
 	return recs, nil
@@ -250,6 +254,7 @@ func collectDrivers(eng memprocfs.Engine) ([]car.Record, error) {
 		recs = append(recs, car.Record{
 			"Offset": d.Offset, "Name": nilIfEmpty(d.Name), "Base": d.Base,
 			"Path": nilIfEmpty(d.Path), "Size": d.Size,
+			"ServiceKey": nilIfEmpty(d.ServiceKey),
 		})
 	}
 	return recs, nil
