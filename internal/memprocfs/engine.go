@@ -47,6 +47,12 @@ type Process struct {
 	// Terminated is MemProcFS's own state marking (ProcessInfo.State != 0) —
 	// the reason a process can be detected yet absent from the PID list.
 	Terminated bool
+	// ObjTypeConfirmed is set when the process's _OBJECT_HEADER TypeIndex,
+	// deobfuscated with the recovered ObHeaderCookie, resolves to the kernel's
+	// Process type — i.e. this _EPROCESS really is a process object. Only
+	// meaningful when object typing is enabled; ObjTypeChecked records that.
+	ObjTypeChecked   bool
+	ObjTypeConfirmed bool
 }
 
 // Module is one loaded module in a process (GetModuleList).

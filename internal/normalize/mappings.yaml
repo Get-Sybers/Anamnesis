@@ -50,7 +50,7 @@ mappings:
       current_working_directory: Cwd
       integrity_level: IntegrityLevel
       env_vars: EnvVars
-    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ExitTime, LogonId, Recovery]
+    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ObjTypeChecked, ObjTypeConfirmed, ExitTime, LogonId, Recovery]
 
   # ---- process TERMINATE events — the _EPROCESS records an exit time ----------
   windows.anamnesis.terminated:

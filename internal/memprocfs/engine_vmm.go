@@ -54,6 +54,7 @@ type vmmEngine struct {
 	userBySID      map[string]string
 	recObCookie    uint8
 	recObCookieOK  bool
+	recProcTypeIdx uint8 // the kernel Process object-type index (set by the gate)
 }
 
 type procRef struct {
