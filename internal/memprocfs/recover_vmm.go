@@ -936,8 +936,10 @@ const procPoolTag = "Proc"
 // result is cross-checked against the enumerated set; any allocation that
 // resolves to a valid Process object the enumeration missed is returned and
 // logged. A no-op without cookie typing or the PID offset — the gates that
-// make a candidate trustworthy. Internal for now: the cross-check is evidence,
-// not yet a user-visible field.
+// make a candidate trustworthy. Called only under ANAMNESIS_POOLSCAN: its one
+// new dependency, GetPoolList, can deadlock on some crash-dump images (the
+// MemProcFS pool subsystem), so it is kept off the default lane. Internal for
+// now: the cross-check is evidence, not yet a user-visible field.
 func (e *vmmEngine) poolScanProcesses() []uint64 {
 	if !e.recObCookieOK || !e.recPIDOK {
 		return nil

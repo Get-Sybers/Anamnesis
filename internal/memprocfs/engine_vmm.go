@@ -239,10 +239,16 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		}
 	}
 	// Independent DKOM-resistant confirmation: a pool-tag scan for process
-	// objects, typed via the recovered ObHeaderCookie and cross-checked
-	// against this enumerated set. Evidence for now (logged); pool-only
-	// candidates are the seed of a future hidden-process surface.
-	e.poolScanProcesses()
+	// objects, typed via the recovered ObHeaderCookie and cross-checked against
+	// this enumerated set. Opt-in (ANAMNESIS_POOLSCAN): the underlying
+	// MemProcFS pool map (GetPoolList) can deadlock on some crash-dump images,
+	// which would take the whole collector down through the watchdog, so it
+	// stays off the default lane until a deadlock-safe enumeration lands. Where
+	// enabled, it is evidence (logged); pool-only candidates are the seed of a
+	// future hidden-process surface.
+	if os.Getenv("ANAMNESIS_POOLSCAN") != "" {
+		e.poolScanProcesses()
+	}
 	e.procCache = out
 	return out, nil
 }
