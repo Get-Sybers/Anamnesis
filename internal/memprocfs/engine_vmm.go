@@ -608,7 +608,94 @@ func (e *vmmEngine) Banners() ([]string, error) {
 // from the VAD map (private + executable + non-image regions).
 func (e *vmmEngine) MFT() ([]MFTRecord, error)       { return nil, nil }
 func (e *vmmEngine) FileScan() ([]FileObject, error) { return nil, nil }
-func (e *vmmEngine) Malfind() ([]MalRegion, error)   { return nil, nil }
+
+// Malfind sweeps every process's VADs for the injection shape: committed
+// private memory, image- and file-backed excluded, with an executable
+// protection (the 3-bit VAD protection index carries the execute bit). The
+// first bytes of each hit are recorded as a hex preview; a region that reads
+// all zero (decommitted or paged out) is dropped rather than shown empty.
+func (e *vmmEngine) Malfind() ([]MalRegion, error) {
+	procs, err := e.Processes()
+	if err != nil {
+		return nil, err
+	}
+	const (
+		perProcessCap = 64
+		totalCap      = 4096
+		previewLen    = 64
+	)
+	var out []MalRegion
+	for i := range procs {
+		p := &procs[i]
+		if p.PID == 0 {
+			continue
+		}
+		vl, verr := e.vmm.GetVadList(p.PID, false)
+		if verr != nil || vl == nil {
+			continue
+		}
+		hits := 0
+		for _, v := range vl.Vads {
+			if !v.IsPrivateMemory || v.IsImage || v.IsFile || !v.IsCommitted {
+				continue
+			}
+			if v.Protection&2 == 0 {
+				continue // no execute bit in the VAD protection index
+			}
+			buf, cb, rerr := e.vmm.MemReadEx(p.PID, v.Start, previewLen, mp.MemFlagNone)
+			if rerr != nil || cb == 0 || allZero(buf) {
+				continue
+			}
+			out = append(out, MalRegion{
+				PID: p.PID, Process: p.Name,
+				StartVPN: v.Start, EndVPN: v.End,
+				Protection:    vadProtection(v.Protection),
+				Tag:           "VadS",
+				CommitCharge:  int(v.CommitCharge),
+				PrivateMemory: 1,
+				Hexdump:       hexPreview(buf),
+			})
+			hits++
+			if hits >= perProcessCap || len(out) >= totalCap {
+				break
+			}
+		}
+		if len(out) >= totalCap {
+			break
+		}
+	}
+	return out, nil
+}
+
+// vadProtection renders the 3-bit VAD protection index in its MM_* order.
+func vadProtection(p uint32) string {
+	names := [8]string{
+		"PAGE_NOACCESS", "PAGE_READONLY", "PAGE_EXECUTE", "PAGE_EXECUTE_READ",
+		"PAGE_READWRITE", "PAGE_WRITECOPY", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY",
+	}
+	return names[p&7]
+}
+
+func allZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// hexPreview renders bytes as space-separated hex pairs.
+func hexPreview(b []byte) string {
+	var sb strings.Builder
+	for i, c := range b {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		fmt.Fprintf(&sb, "%02x", c)
+	}
+	return sb.String()
+}
 
 // --- decode helpers ----------------------------------------------------------
 

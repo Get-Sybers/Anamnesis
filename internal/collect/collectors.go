@@ -37,6 +37,29 @@ func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
+// collectTerminated -> windows.anamnesis.terminated: one row per process whose
+// _EPROCESS records an exit time — the CAR process/terminate event.
+func collectTerminated(eng memprocfs.Engine) ([]car.Record, error) {
+	procs, err := eng.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var recs []car.Record
+	for _, p := range procs {
+		if p.ExitTime == "" {
+			continue
+		}
+		recs = append(recs, car.Record{
+			"Offset": p.EPROCESS, "Guid": memprocfs.ProcGUID(p.EPROCESS),
+			"PID": int(p.PID), "PPID": int(p.PPID), "ImageFileName": p.Name,
+			"Path": nilIfEmpty(p.Path), "CommandLine": nilIfEmpty(p.CommandLine),
+			"CreateTime": nilIfEmpty(p.CreateTime), "ExitTime": nilIfEmpty(p.ExitTime),
+			"Sid": nilIfEmpty(p.SID), "User": nilIfEmpty(p.User),
+		})
+	}
+	return recs, nil
+}
+
 // collectPslist -> windows.pslist (context: the active-list contrast).
 func collectPslist(eng memprocfs.Engine) ([]car.Record, error) {
 	active, _ := eng.ActivePIDs()

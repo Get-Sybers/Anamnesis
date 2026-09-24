@@ -6,6 +6,7 @@ default_plugins:
   - banners.Banners
   - windows.info
   - windows.anamnesis.processes
+  - windows.anamnesis.terminated
   - windows.pslist
   - windows.anamnesis.modules
   - windows.modules
