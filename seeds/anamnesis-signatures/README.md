@@ -11,6 +11,9 @@ disp32 is wildcarded so one pattern generalizes across builds. One
 
     symrec -fingerprint seeds/anamnesis-signatures <ntoskrnl.exe> <routine> <global> [byte]
 
-`routine` is resolved by export name (the in-image anchor-recovery slice adds
-non-exported RVA targets). The engine's runtime self-test + ground-truth
-cross-check prove the scanner before any signature is trusted.
+`routine` is resolved by export name. Non-exported globals need no build-time
+harvest: the engine recovers them in-image from structural anchors and authors
+their signatures itself, into the persistent cache's `anamnesis-signatures/`
+(the self-teaching mirror of this directory). The runtime self-test, the
+ground-truth cross-check, and each global's consume gate prove the scanner and
+every located address before either source is trusted.

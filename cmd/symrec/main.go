@@ -133,8 +133,8 @@ func seedOne(dir, path string) error {
 // from a reference kernel PE and writes it into the signature store. routine
 // is resolved by export name; global is the name the routine's first RIP
 // operand references. The signature masks the disp32, so it generalizes
-// across builds. (Non-exported routines, addressed by RVA, come with the
-// in-image anchor-recovery slice.)
+// across builds. Non-exported routines need no build-time harvest at all:
+// the engine authors their signatures in-image at runtime (anchor recovery).
 func harvest(dir, pePath, routine, global string, byteOperand bool) int {
 	img, err := symbols.OpenPE(pePath)
 	if err != nil {

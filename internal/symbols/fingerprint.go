@@ -55,6 +55,36 @@ func BuildSignature(name, global string, code []byte, byteOperand bool) (Signatu
 	return Signature{}, false
 }
 
+// BuildSignatureAround pins a window of image bytes that ends exactly at a
+// RIP-relative instruction's end and wildcards every RIP disp32 the decoder
+// finds in the window — the target instruction's (the window's last four
+// bytes) and any other RIP reference in the leading context, since every
+// disp32 moves independently across builds while the code shape does not. It
+// authors a signature for a reference site found by scanning the image —
+// where, unlike BuildSignature, the window need not start on the routine's
+// first instruction. The caller is responsible for proving the window
+// (unique in the image, and the applier resolves it to the intended global)
+// before shipping it.
+func BuildSignatureAround(name, global string, window []byte, byteOperand bool) (Signature, bool) {
+	if len(window) < 8 {
+		return Signature{}, false
+	}
+	pat := append([]byte(nil), window...)
+	mask := make([]byte, len(window))
+	for i := range mask {
+		mask[i] = 0xFF
+	}
+	for i := len(window) - 4; i < len(window); i++ {
+		mask[i] = 0x00
+	}
+	for _, h := range RIPTargetAll(window, 0) {
+		for i := h.At - 4; i >= 0 && i < h.At && i < len(window); i++ {
+			mask[i] = 0x00
+		}
+	}
+	return Signature{Name: name, Global: global, Pattern: pat, Mask: mask, ByteOperand: byteOperand}, true
+}
+
 // MatchSignature returns the VA and offset of the first place in text where
 // sig's masked pattern matches. ok=false when the pattern is malformed or
 // absent.

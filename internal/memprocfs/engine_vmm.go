@@ -58,7 +58,12 @@ type vmmEngine struct {
 	kImage         []byte
 	kImageVA       uint64
 	kImageTried    bool
-	fpOK           bool // the fingerprint scanner proved itself on this build
+	kBase          uint64 // ntoskrnl base/size (kernelSpan) — store RVAs resolve against kBase
+	kSize          uint64
+	kSpanTried     bool
+	fpOK           bool   // the fingerprint scanner proved itself on this build
+	recHeadVA      uint64 // PsActiveProcessHead, ring-gated (anchor- or signature-recovered)
+	recHeadOK      bool
 }
 
 type procRef struct {

@@ -207,34 +207,49 @@ func (e *vmmEngine) recoverPrePass() {
 	}
 
 	// ObHeaderCookie: keyless recovery of the _OBJECT_HEADER.TypeIndex key
-	// (§7). The reference VA is build-stable (cached in the store, seedable);
-	// the cookie value is per-boot random, so it is re-read and gated from
-	// this image on every load. Enables correct object typing for future
+	// (§7). Only the reference RVA is build-stable (cached in the store,
+	// seedable) — under KASLR the VA moves every boot, so the store carries
+	// module-relative addresses and the module base is added per image. The
+	// cookie value is per-boot random, so it is re-read and gated from this
+	// image on every load. Enables correct object typing for future
 	// pool/handle scanning — no user-visible field yet.
 	cookieRef := symbols.KernelGlobals[0] // ObGetObjectType -> ObHeaderCookie
-	cookieVA, haveCookieVA := entry.Global(cookieRef.Global)
-	if !haveCookieVA {
-		if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, cookieRef); found {
-			cookieVA, haveCookieVA = va, true
-			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: cookieRef.Global, VA: va, Confidence: symbols.BestEffort}) {
+	kBase, kSize, haveSpan := e.kernelSpan()
+	var cookieVA uint64
+	var haveCookieVA bool
+	// An RVA is only meaningful inside the module span — enforced both when a
+	// stored value is consumed and before a fresh recovery is persisted, so an
+	// out-of-module address is never cached or read through.
+	if rva, have := entry.Global(cookieRef.Global); have && haveSpan && rva < kSize {
+		cookieVA, haveCookieVA = kBase+rva, true
+	} else if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, cookieRef); found {
+		cookieVA, haveCookieVA = va, true
+		if haveSpan && va > kBase && va-kBase < kSize {
+			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: cookieRef.Global, RVA: va - kBase, Confidence: symbols.BestEffort}) {
 				dirty = true
 			}
-			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %s reference VA %#x (guid=%s age=%d)\n", cookieRef.Global, va, key.GUID, key.Age)
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %s at RVA %#x (guid=%s age=%d)\n", cookieRef.Global, va-kBase, key.GUID, key.Age)
 		}
 	}
 
 	// Function fingerprinting: prove the masked-pattern scan on THIS build's
 	// real ntoskrnl image (self-test against exported ground truth), then
-	// recover the VAs of globals whose reading routines are not exported from
-	// the shipped signatures. Only a passing self-test enables it; the
-	// recovered VAs cache in the store like the cookie. The ground-truth
-	// cross-check confirms a fingerprinted global equals its exported-path VA.
+	// recover globals whose reading routines are not exported from the shipped
+	// signatures. Only a passing self-test enables it; recovered RVAs cache in
+	// the store like the cookie. The ground-truth cross-check confirms a
+	// fingerprinted global equals its exported-path VA.
 	e.fpOK = e.fingerprintSelfTest()
 	if e.fpOK {
 		e.fingerprintGroundTruth()
 		if e.applyShippedSignatures(entry) {
 			dirty = true
 		}
+	}
+
+	// PsActiveProcessHead: in-image anchor recovery, and — first sighting of a
+	// build — signature authoring, so later builds can locate it by pattern.
+	if e.recoverProcessHead(entry) {
+		dirty = true
 	}
 
 	if dirty && len(entry.Offsets) > 0 {
@@ -281,6 +296,25 @@ const tokenScanFunc = "TokenScan"
 // kernelImageCap bounds the ntoskrnl span read for fingerprint scanning.
 const kernelImageCap = 16 << 20
 
+// kernelSpan resolves the ntoskrnl module's base and mapped size, cached per
+// engine. Store RVAs resolve against the base; the size bounds in-module
+// checks (a kernel global must lie inside the span).
+func (e *vmmEngine) kernelSpan() (base, size uint64, ok bool) {
+	if e.kBase != 0 {
+		return e.kBase, e.kSize, true
+	}
+	if e.kSpanTried {
+		return 0, 0, false
+	}
+	e.kSpanTried = true
+	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlag(0))
+	if err != nil || mod == nil || mod.BaseAddress == 0 || mod.ImageSize == 0 {
+		return 0, 0, false
+	}
+	e.kBase, e.kSize = mod.BaseAddress, uint64(mod.ImageSize)
+	return e.kBase, e.kSize, true
+}
+
 // kernelImage reads the ntoskrnl module image span (base..base+ImageSize,
 // capped) for masked-pattern scanning, cached per engine. It reads the whole
 // mapped module, not an isolated .text section. baseVA is the module base — a
@@ -293,11 +327,11 @@ func (e *vmmEngine) kernelImage() (image []byte, baseVA uint64, ok bool) {
 		return nil, 0, false
 	}
 	e.kImageTried = true
-	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlag(0))
-	if err != nil || mod == nil || mod.BaseAddress == 0 {
+	base, modSize, ok := e.kernelSpan()
+	if !ok {
 		return nil, 0, false
 	}
-	size := int(mod.ImageSize)
+	size := int(modSize)
 	if size <= 0 || size > kernelImageCap {
 		size = kernelImageCap
 	}
@@ -309,7 +343,7 @@ func (e *vmmEngine) kernelImage() (image []byte, baseVA uint64, ok bool) {
 		if off+n > size {
 			n = size - off
 		}
-		b, cb, rerr := e.vmm.MemReadEx(systemPID, mod.BaseAddress+uint64(off), uint32(n), mp.MemFlagNone)
+		b, cb, rerr := e.vmm.MemReadEx(systemPID, base+uint64(off), uint32(n), mp.MemFlagNone)
 		if rerr != nil || cb == 0 {
 			break
 		}
@@ -321,7 +355,7 @@ func (e *vmmEngine) kernelImage() (image []byte, baseVA uint64, ok bool) {
 	if len(buf) == 0 {
 		return nil, 0, false
 	}
-	e.kImage, e.kImageVA = buf, mod.BaseAddress
+	e.kImage, e.kImageVA = buf, base
 	return e.kImage, e.kImageVA, true
 }
 
@@ -396,29 +430,49 @@ func (e *vmmEngine) fingerprintGroundTruth() {
 	}
 }
 
-// sigDirs lists where shipped fingerprint signatures are read from: the
-// read-only baked seed dir (ANAMNESIS_SIG_DIR, default /opt/anamnesis/
-// seed-signatures). Signatures generalize across builds, so they are not
-// per-(GUID,age) and are never written at runtime.
+// sigDirs lists where fingerprint signatures are READ, in priority order: the
+// persistent cache beside vmm.so, the /tmp fallback, and the read-only baked
+// seed dir (ANAMNESIS_SIG_DIR, default /opt/anamnesis/seed-signatures).
+// Signatures are not per-(GUID,age) — a masked pattern carries wherever the
+// code shape does — and the cache self-teaches: an in-image anchor recovery
+// AUTHORS a signature into the writable location, so a later image whose
+// build shares that shape may locate the same global by pattern; one that
+// does not match is skipped and recovered by its own anchor.
 func (e *vmmEngine) sigDirs() []string {
-	dir := os.Getenv("ANAMNESIS_SIG_DIR")
-	if dir == "" {
-		dir = "/opt/anamnesis/seed-signatures"
+	dirs := []string{
+		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.SigSubdir),
+		filepath.Join("/tmp", symbols.SigSubdir),
 	}
-	return []string{dir}
+	seed := os.Getenv("ANAMNESIS_SIG_DIR")
+	if seed == "" {
+		seed = "/opt/anamnesis/seed-signatures"
+	}
+	return append(dirs, seed)
 }
 
-// applyShippedSignatures locates each shipped signature's global by pattern
-// and caches its VA in the store (per build, like the cookie). A global whose
-// VA is already in the entry is left alone (build-stable, seedable). Returns
-// whether the entry gained a global. Each recovered VA must be a canonical
-// kernel pointer — the minimal sanity gate for a global address; richer
-// per-global consume gates arrive with the transforms that use them.
+// writableSigDir picks the first signature location that can actually be
+// written (the baked seed dir is read-only and excluded), like
+// writableStoreDir. "" when neither works.
+func (e *vmmEngine) writableSigDir() string {
+	return firstWritableDir([]string{
+		filepath.Join(filepath.Dir(e.lib), "Symbols", symbols.SigSubdir),
+		filepath.Join("/tmp", symbols.SigSubdir),
+	})
+}
+
+// applyShippedSignatures locates each stored signature's global by pattern
+// and caches its RVA in the store (per build, like the cookie). A global
+// already in the entry is left alone (build-stable, seedable). The recovered
+// address must lie inside the kernel module (an RVA is meaningless
+// otherwise), and a global with a consume gate must pass it before it is
+// trusted — PsActiveProcessHead's gate walks the ring from the candidate
+// head. Returns whether the entry gained a global.
 func (e *vmmEngine) applyShippedSignatures(entry *symbols.StoreEntry) bool {
 	image, base, ok := e.kernelImage()
 	if !ok {
 		return false
 	}
+	_, size, _ := e.kernelSpan()
 	var sigs []symbols.Signature
 	for _, dir := range e.sigDirs() {
 		s, err := symbols.ReadSignatures(dir, "ntoskrnl.exe")
@@ -430,22 +484,201 @@ func (e *vmmEngine) applyShippedSignatures(entry *symbols.StoreEntry) bool {
 		}
 		sigs = append(sigs, s...)
 	}
+	gates := map[string]func(uint64) bool{headGlobal: e.headRingGate}
 	dirty := false
 	for _, sig := range sigs {
 		if _, have := entry.Global(sig.Global); have {
 			continue
 		}
 		va, found := symbols.RecoverGlobalByFingerprint(image, base, sig)
-		if !found || va < kernelVAFloor {
-			fmt.Fprintf(os.Stderr, "[anamnesis] signature %s (%s) did not locate a canonical global — skipped\n", sig.Name, sig.Global)
+		if !found || va <= base || va-base >= size {
+			fmt.Fprintf(os.Stderr, "[anamnesis] signature %s (%s) did not locate an in-module global — skipped\n", sig.Name, sig.Global)
 			continue
 		}
-		if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: sig.Global, VA: va, Confidence: symbols.BestEffort}) {
+		if gate := gates[sig.Global]; gate != nil && !gate(va) {
+			fmt.Fprintf(os.Stderr, "[anamnesis] signature %s located %s at %#x but it failed the consume gate — skipped\n", sig.Name, sig.Global, va)
+			continue
+		}
+		if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: sig.Global, RVA: va - base, Confidence: symbols.BestEffort}) {
 			dirty = true
-			fmt.Fprintf(os.Stderr, "[anamnesis] fingerprinted %s -> %s VA %#x\n", sig.Name, sig.Global, va)
+			fmt.Fprintf(os.Stderr, "[anamnesis] fingerprinted %s -> %s RVA %#x\n", sig.Name, sig.Global, va-base)
+		}
+		if sig.Global == headGlobal {
+			e.recHeadVA, e.recHeadOK = va, true
 		}
 	}
 	return dirty
+}
+
+// headGlobal is the kernel's active-process list head — a global LIST_ENTRY
+// in ntoskrnl's data, not exported and not inside any _EPROCESS.
+const headGlobal = "PsActiveProcessHead"
+
+// systemLinksEntry is the System process's own ActiveProcessLinks entry VA —
+// the anchor every ring walk and gate hangs off.
+func (e *vmmEngine) systemLinksEntry() (uint64, bool) {
+	if !e.recLinksOK {
+		return 0, false
+	}
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return 0, false
+	}
+	return pi.Win.EPROCESS + uint64(e.recLinksOffset), true
+}
+
+// walkRing follows Flink from start until the ring closes (entries, true) or
+// the walk dies — a non-canonical pointer, a failed read, or no closure
+// within the bound (nil, false).
+func (e *vmmEngine) walkRing(start uint64) ([]uint64, bool) {
+	const maxRing = 8192
+	entries := make([]uint64, 0, 512)
+	entry := start
+	for i := 0; i < maxRing; i++ {
+		entries = append(entries, entry)
+		f, err := e.vmm.MemRead(systemPID, entry, 8)
+		if err != nil || len(f) < 8 {
+			return nil, false
+		}
+		next := leU64(f)
+		if next == start {
+			return entries, true
+		}
+		if next < kernelVAFloor {
+			return nil, false
+		}
+		entry = next
+	}
+	return nil, false
+}
+
+// headRingGate is PsActiveProcessHead's consume gate: the ring walked FROM
+// the candidate head must close, be plausibly populated, and pass through the
+// System process's own links entry. A wrong head — a stale stored RVA, a
+// mislocated signature — fails here and is never consumed.
+func (e *vmmEngine) headRingGate(head uint64) bool {
+	sysEntry, ok := e.systemLinksEntry()
+	if !ok {
+		return false
+	}
+	entries, closed := e.walkRing(head)
+	if !closed || len(entries) < 5 {
+		return false
+	}
+	for _, en := range entries {
+		if en == sysEntry {
+			return true
+		}
+	}
+	return false
+}
+
+// recoverProcessHead resolves PsActiveProcessHead. A stored RVA is gated and
+// consumed; otherwise the head is recovered from the ring itself — every
+// ActiveProcessLinks entry lives inside an _EPROCESS except the list head,
+// which is a global in the kernel image, so the single ring entry inside the
+// ntoskrnl span IS the head (§6 structural anchor, no signature needed). On
+// an anchor recovery the head's signature is authored from this image into
+// the writable signature store, so a later image whose build shares the code
+// shape may locate it by pattern before its own ring is walked. Returns
+// whether entry gained the global.
+func (e *vmmEngine) recoverProcessHead(entry *symbols.StoreEntry) bool {
+	if e.recHeadOK {
+		return false // a stored signature already located and gated it
+	}
+	base, size, ok := e.kernelSpan()
+	if !ok {
+		return false
+	}
+	if rva, have := entry.Global(headGlobal); have && rva < size {
+		if va := base + rva; e.headRingGate(va) {
+			e.recHeadVA, e.recHeadOK = va, true
+			return false
+		}
+		// base wins in the store; this image simply does not consume it.
+		fmt.Fprintf(os.Stderr, "[anamnesis] stored %s RVA failed the ring gate — ignored for this image\n", headGlobal)
+		return false
+	}
+	sysEntry, ok := e.systemLinksEntry()
+	if !ok {
+		return false
+	}
+	entries, closed := e.walkRing(sysEntry)
+	if !closed {
+		return false
+	}
+	var head uint64
+	inModule := 0
+	for _, en := range entries {
+		if en > base && en-base < size {
+			head = en
+			inModule++
+		}
+	}
+	if inModule != 1 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ring anchor: %d in-module entries, want exactly 1 — %s not recovered\n", inModule, headGlobal)
+		return false
+	}
+	e.recHeadVA, e.recHeadOK = head, true
+	fmt.Fprintf(os.Stderr, "[anamnesis] recovered %s %#x (RVA %#x) via ring anchor\n", headGlobal, head, head-base)
+	if e.fpOK {
+		e.authorHeadSignature(head)
+	}
+	return symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: headGlobal, RVA: head - base, Confidence: symbols.BestEffort})
+}
+
+// authorHeadSignature writes a masked signature for a code site that
+// references the recovered head into the writable signature store — in-image
+// authoring, the bridge from anchor recovery to build-time-style shipping. A
+// window is accepted only when it is unique in this image and the applier
+// resolves it back to the same head; wider windows are tried until one is.
+func (e *vmmEngine) authorHeadSignature(head uint64) {
+	image, base, ok := e.kernelImage()
+	if !ok {
+		return
+	}
+	dir := e.writableSigDir()
+	if dir == "" {
+		return
+	}
+	// One signature per authoring build: variants accumulate in the store and
+	// the applier tries each, so lineages the cache has seen stay locatable.
+	sigName := headGlobal + ".ref"
+	if guid, age, err := e.kernelCodeView(); err == nil {
+		sigName = fmt.Sprintf("%s.ref@%s-%d", headGlobal, guid, age)
+	}
+	for _, h := range symbols.RIPTargetAll(image, base) {
+		if h.Target != head {
+			continue
+		}
+		for _, win := range []int{24, 32, 40} {
+			start := h.At - win
+			if start < 0 {
+				continue
+			}
+			sig, built := symbols.BuildSignatureAround(sigName, headGlobal, image[start:h.At], false)
+			if !built {
+				continue
+			}
+			_, off, found := symbols.MatchSignature(image, base, sig)
+			if !found {
+				continue
+			}
+			if _, _, dup := symbols.MatchSignature(image[off+1:], base+uint64(off)+1, sig); dup {
+				continue
+			}
+			if va, applied := symbols.RecoverGlobalByFingerprint(image, base, sig); !applied || va != head {
+				continue
+			}
+			if err := symbols.WriteSignature(dir, "ntoskrnl.exe", sig); err != nil {
+				fmt.Fprintf(os.Stderr, "[anamnesis] signature store write failed: %v\n", err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "[anamnesis] authored %s signature from the in-image anchor (site RVA %#x, %d-byte window)\n", headGlobal, uint64(start), win)
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] no authorable reference site for %s in this image\n", headGlobal)
 }
 
 // harvestSignature builds a masked signature from a routine's leading bytes:
@@ -607,7 +840,13 @@ func (e *vmmEngine) writableStoreCandidates() []string {
 // read-only Symbols mount (where the parent exists but the subdir cannot be
 // made) correctly falls through to the /tmp store. "" when neither works.
 func (e *vmmEngine) writableStoreDir() string {
-	for _, dir := range e.writableStoreCandidates() {
+	return firstWritableDir(e.writableStoreCandidates())
+}
+
+// firstWritableDir returns the first directory in dirs that can be created
+// and written (proven with a probe file, not assumed from a stat).
+func firstWritableDir(dirs []string) string {
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			continue
 		}
@@ -780,11 +1019,13 @@ func (e *vmmEngine) linksClosureHolds(off uint32) bool {
 	return err == nil && len(bf) >= 8 && leU64(bf) == entry
 }
 
-// linkedPIDs walks ActiveProcessLinks from the System process and returns the
-// PIDs on the ring (cached — the walk is per image, not per collector). nil
-// when the offsets are unavailable or the walk does not close plausibly. The
-// list HEAD (PsActiveProcessHead, not inside an _EPROCESS) contributes one
-// junk key; harmless, since the set is only queried for detected PIDs.
+// linkedPIDs walks ActiveProcessLinks and returns the PIDs on the ring
+// (cached — the walk is per image, not per collector). With the recovered
+// PsActiveProcessHead the walk starts at the authoritative head and the head
+// entry itself (a kernel global, not inside an _EPROCESS) is excluded;
+// without it the walk anchors on the System process and the head contributes
+// one junk key — harmless, since the set is only queried for detected PIDs.
+// nil when the offsets are unavailable or the walk does not close plausibly.
 func (e *vmmEngine) linkedPIDs() map[uint32]bool {
 	if e.linkedOnce {
 		return e.linkedCache
@@ -793,38 +1034,35 @@ func (e *vmmEngine) linkedPIDs() map[uint32]bool {
 	if !e.recLinksOK || !e.recPIDOK {
 		return nil
 	}
-	pi, err := e.vmm.GetProcessInfo(systemPID)
-	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+	start, ok := e.systemLinksEntry()
+	if !ok {
 		return nil
 	}
-	const maxRing = 8192
-	out := make(map[uint32]bool)
-	start := pi.Win.EPROCESS + uint64(e.recLinksOffset)
-	entry := start
-	for i := 0; i < maxRing; i++ {
+	anchor := "System"
+	fromHead := e.recHeadOK
+	if fromHead {
+		start, anchor = e.recHeadVA, headGlobal
+	}
+	entries, closed := e.walkRing(start)
+	if !closed {
+		return nil // never closed — corrupt or wrong offset
+	}
+	out := make(map[uint32]bool, len(entries))
+	for _, entry := range entries {
+		if fromHead && entry == start {
+			continue // the head is not an _EPROCESS
+		}
 		ep := entry - uint64(e.recLinksOffset)
 		if b, rerr := e.vmm.MemRead(systemPID, ep+uint64(e.recPIDOffset), 8); rerr == nil && len(b) >= 8 {
 			out[uint32(leU64(b))] = true
 		}
-		f, rerr := e.vmm.MemRead(systemPID, entry, 8)
-		if rerr != nil || len(f) < 8 {
-			return nil
-		}
-		next := leU64(f)
-		if next == start {
-			if len(out) < 4 {
-				return nil // implausibly small ring
-			}
-			fmt.Fprintf(os.Stderr, "[anamnesis] active-list ring: %d linked processes\n", len(out))
-			e.linkedCache = out
-			return out
-		}
-		if next < kernelVAFloor {
-			return nil
-		}
-		entry = next
 	}
-	return nil // never closed — corrupt or wrong offset
+	if len(out) < 4 {
+		return nil // implausibly small ring
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] active-list ring: %d linked processes (walked from %s)\n", len(out), anchor)
+	e.linkedCache = out
+	return out
 }
 
 // stillActive reads a process's ExitStatus through the recovered offset;
