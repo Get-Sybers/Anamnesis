@@ -340,6 +340,7 @@ mappings:
     action: enumerate
     ts: null
     owning_pid: PID
+    owning_offset: OwnerOffset
     guid: {fields: [Offset]}
     props:
       name: Name
