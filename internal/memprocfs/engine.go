@@ -53,6 +53,12 @@ type Process struct {
 	// meaningful when object typing is enabled; ObjTypeChecked records that.
 	ObjTypeChecked   bool
 	ObjTypeConfirmed bool
+	// PoolOnly marks a process discovered ONLY by the pool-tag scan — its
+	// "Proc" allocation exists and types as a Process object, but every
+	// normal enumeration missed it (the DKOM-hiding signal). Such a row is
+	// built from recovered offsets alone; fields that need process context
+	// stay empty.
+	PoolOnly bool
 }
 
 // Module is one loaded module in a process (GetModuleList).
@@ -157,7 +163,13 @@ type Driver struct {
 
 // RegValue is one registry value under a curated key.
 type RegValue struct {
+	// Hive is the mount-rooted hive identity (e.g. `HKLM\SOFTWARE`) — the
+	// stable rendering; HivePath is the hive's backing file as the in-memory
+	// CMHIVE records it (e.g. `\SystemRoot\System32\Config\SOFTWARE`), ""
+	// when the hive list does not resolve it. Both are surfaced so the model
+	// side can choose its identity component.
 	Hive      string
+	HivePath  string
 	Key       string
 	ValueName string
 	ValueType string
@@ -165,24 +177,36 @@ type RegValue struct {
 	LastWrite string
 }
 
-// MFTRecord is one $MFT attribute row (forensic NTFS).
+// MFTRecord is one $MFT attribute row (carved FILE records). RecordNumber
+// alone recycles after deletion; SequenceNumber disambiguates, and
+// FileReference (RecordNumber | SequenceNumber<<48) is the full NTFS
+// reference the disk lane keys on.
 type MFTRecord struct {
-	RecordNumber  int
-	AttributeType string
-	MFTType       string
-	Filename      string
-	Created       string
-	Modified      string
-	Updated       string
-	Accessed      string
-	Offset        uint64
-	Permissions   string
+	RecordNumber   int
+	SequenceNumber int
+	FileReference  uint64
+	AttributeType  string
+	MFTType        string
+	Filename       string
+	Created        string
+	Modified       string
+	Updated        string
+	Accessed       string
+	Offset         uint64
+	Permissions    string
 }
 
-// FileObject is one ownerless FILE_OBJECT (forensic file scan).
+// FileObject is one ownerless FILE_OBJECT (pool-tag file scan).
 type FileObject struct {
 	Offset uint64
 	Name   string
+}
+
+// FileGUID synthesizes the CAR file guid from a FILE_OBJECT virtual address —
+// "file-<hex>", the same convention the pipeline mints for handle-enumerated
+// file objects, so one offset always spells one identity.
+func FileGUID(fileObject uint64) string {
+	return "file-" + strconv.FormatUint(fileObject, 16)
 }
 
 // MalRegion is one suspicious VAD region (private, executable, non-image).

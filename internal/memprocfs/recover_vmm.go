@@ -196,6 +196,16 @@ func (e *vmmEngine) recoverPrePass() {
 	if off, ok := entry.Offset("PsGetProcessExitStatus"); ok && off > 0 && e.systemDwordAt(uint32(off)) == stillActiveStatus {
 		e.recExitOffset, e.recExitOK = uint32(off), true
 	}
+	// InheritedFromUniqueProcessId and ImageFileName back the pool-only rows
+	// (a hidden process has no MemProcFS ProcessInfo, so every field is a
+	// direct _EPROCESS read). Same self-quarantine: System's PPID is 0 and
+	// its image name is the literal "System".
+	if off, ok := entry.Offset("PsGetProcessInheritedFromUniqueProcessId"); ok && off > 0 && e.systemQwordAt(uint32(off)) == 0 {
+		e.recPPIDOffset, e.recPPIDOK = uint32(off), true
+	}
+	if off, ok := entry.Offset("PsGetProcessImageFileName"); ok && off > 0 && e.imageNameAt(0, uint32(off)) == "System" {
+		e.recImgOffset, e.recImgOK = uint32(off), true
+	}
 	// ActiveProcessLinks directly follows UniqueProcessId on every known x64
 	// build; the adjacency is accepted only when the LIST_ENTRY closure
 	// invariant holds through the System process (§3: x->Flink->Blink == x
@@ -1156,6 +1166,69 @@ func (e *vmmEngine) readPadded(va uint64, n uint32) ([]byte, bool) {
 		b = b[:n]
 	}
 	return b, true
+}
+
+// imageNameAt reads the 15-byte _EPROCESS.ImageFileName at off — NUL-trimmed
+// and required printable, "" otherwise. ep 0 means the System process (the
+// consume gate's ground truth).
+func (e *vmmEngine) imageNameAt(ep uint64, off uint32) string {
+	if ep == 0 {
+		pi, err := e.vmm.GetProcessInfo(systemPID)
+		if err != nil || pi == nil {
+			return ""
+		}
+		ep = pi.Win.EPROCESS
+	}
+	b, err := e.vmm.MemRead(systemPID, ep+uint64(off), 15)
+	if err != nil || len(b) < 15 {
+		return "" // a short read could pass a truncated name through the gate
+	}
+	n := 0
+	for n < len(b) && b[n] != 0 {
+		if b[n] < 0x20 || b[n] > 0x7E {
+			return ""
+		}
+		n++
+	}
+	return string(b[:n])
+}
+
+// poolOnlyProcess builds a Process row for a pool-scanned _EPROCESS the
+// enumeration missed — a DKOM-hidden process. There is no ProcessInfo to draw
+// from, so every field is a direct read through the recovered offsets, each
+// already System-gated at consume time; what does not decode stays honestly
+// empty. The typing gates (poolScanProcesses) already confirmed the object.
+func (e *vmmEngine) poolOnlyProcess(ep uint64) Process {
+	p := Process{
+		EPROCESS: ep, PoolOnly: true,
+		ObjTypeChecked: true, ObjTypeConfirmed: true,
+	}
+	rec := []string{"detection=pool_scan"}
+	p.PID = e.readDword(ep + uint64(e.recPIDOffset)) // gated non-zero by the scan
+	if e.recPPIDOK {
+		p.PPID = e.readDword(ep + uint64(e.recPPIDOffset))
+	}
+	if e.recImgOK {
+		if name := e.imageNameAt(ep, e.recImgOffset); name != "" {
+			p.Name = name
+			rec = append(rec, "exe=eprocess")
+		}
+	}
+	p.CreateTime = e.createTime(0, ep)
+	p.ExitTime = e.exitTimeISO(ep)
+	p.Terminated = p.ExitTime != ""
+	if e.recTokenOK {
+		if sid, method := e.tokenSID(ep); sid != "" {
+			p.SID = sid
+			rec = append(rec, "sid="+method)
+			if u := e.userBySID[sid]; u != "" {
+				p.User = u
+				rec = append(rec, "user=userlist")
+			}
+		}
+	}
+	p.Recovery = strings.Join(rec, ";")
+	return p
 }
 
 // readDword reads a little-endian uint32 at an absolute VA (System

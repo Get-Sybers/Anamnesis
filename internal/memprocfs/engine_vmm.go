@@ -44,6 +44,10 @@ type vmmEngine struct {
 	recTokenOK     bool
 	recPIDOffset   uint32
 	recPIDOK       bool
+	recPPIDOffset  uint32
+	recPPIDOK      bool
+	recImgOffset   uint32
+	recImgOK       bool
 	recExitOffset  uint32
 	recExitOK      bool
 	recLinksOffset uint32
@@ -51,6 +55,7 @@ type vmmEngine struct {
 	linkedOnce     bool
 	linkedCache    map[uint32]bool
 	handleCache    map[uint32][]Handle
+	hivePaths      map[string]string // mount-rooted hive identity -> backing file path
 	userBySID      map[string]string
 	recObCookie    uint8
 	recObCookieOK  bool
@@ -226,6 +231,22 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		out = append(out, p)
 		e.epToProc[pi.Win.EPROCESS] = procRef{pid: pi.PID, name: pi.Name()}
 	}
+	// Independent DKOM-resistant confirmation: a pool-tag scan for process
+	// objects, typed via the recovered ObHeaderCookie and cross-checked against
+	// this enumerated set. Default-on (ANAMNESIS_POOLSCAN=0 switches it off):
+	// the enumeration is the engine's own bounded sweep — never the MemProcFS
+	// pool map (GetPoolList), which deadlocks on some crash-dump images — so
+	// every read is bounded and there is no stall lane to keep off. A pool-only
+	// candidate — an allocation the enumeration missed — joins the row set as
+	// a PoolOnly process built from recovered offsets: its disk traces exist
+	// as rows, so the memory row proving the hiding must too.
+	if poolScanEnabled() {
+		for _, ep := range e.poolScanProcesses() {
+			p := e.poolOnlyProcess(ep)
+			out = append(out, p)
+			e.epToProc[ep] = procRef{pid: p.PID, name: p.Name}
+		}
+	}
 	for i := range out {
 		out[i].ParentPath = pathByPID[out[i].PPID]
 	}
@@ -237,17 +258,6 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 				out[i].Unlinked = true
 			}
 		}
-	}
-	// Independent DKOM-resistant confirmation: a pool-tag scan for process
-	// objects, typed via the recovered ObHeaderCookie and cross-checked against
-	// this enumerated set. Default-on (ANAMNESIS_POOLSCAN=0 switches it off):
-	// the enumeration is the engine's own bounded sweep — never the MemProcFS
-	// pool map (GetPoolList), which deadlocks on some crash-dump images — so
-	// every read is bounded and there is no stall lane to keep off. The scan
-	// is evidence (logged); pool-only candidates are the seed of a future
-	// hidden-process surface.
-	if poolScanEnabled() {
-		e.poolScanProcesses()
 	}
 	e.procCache = out
 	return out, nil
@@ -265,19 +275,23 @@ func poolScanEnabled() bool {
 	return true
 }
 
-// poolScanBudget reads ANAMNESIS_POOLSCAN_BUDGET (a Go duration; 0 sweeps
-// without a time limit) — the wall-clock the pool-tag sweep may spend before
-// it stops with loudly-reported partial coverage. The default keeps the scan
-// comfortably inside the 5-minute stall watchdog: the sweep's reads are
-// byte-bounded but their duration depends on the image's I/O behaviour.
-func poolScanBudget() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("ANAMNESIS_POOLSCAN_BUDGET"))
+// poolScanBudget reads ANAMNESIS_POOLSCAN_BUDGET — the wall-clock the
+// pool-tag sweep may spend before it stops with loudly-reported partial
+// coverage. See scanBudget.
+func poolScanBudget() time.Duration { return scanBudget("ANAMNESIS_POOLSCAN_BUDGET") }
+
+// scanBudget reads a carve/sweep budget env (a Go duration; 0 scans without a
+// time limit; default 2m). Every bounded scan carries one: its reads are
+// byte-bounded but their duration depends on the image's I/O behaviour, and a
+// scan slower than the stall watchdog would cost the whole collector.
+func scanBudget(env string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(env))
 	if raw == "" {
 		return 2 * time.Minute
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil || d < 0 {
-		fmt.Fprintf(os.Stderr, "[anamnesis] ignoring invalid ANAMNESIS_POOLSCAN_BUDGET %q\n", raw)
+		fmt.Fprintf(os.Stderr, "[anamnesis] ignoring invalid %s %q\n", env, raw)
 		return 2 * time.Minute
 	}
 	return d
@@ -667,9 +681,10 @@ func (e *vmmEngine) Drivers() ([]Driver, error) {
 }
 
 // RegistryValues reads the curated keys. MemProcFS registry paths are hive-rooted
-// (e.g. "HKLM\SOFTWARE\..."); each target is tried under a few roots.
-// TODO(on-target): confirm the exact path roots and add per-value LastWriteTime
-// (via the parent key), and SID->name via ProfileList.
+// (e.g. "HKLM\SOFTWARE\..."); each target is tried under a few roots. Each row
+// carries the hive twice: the mount-rooted identity (`HKLM\SOFTWARE`) and the
+// hive's backing file path out of the in-memory CMHIVE — the components a
+// cross-source registry identity is built from (hive + key + last_write).
 func (e *vmmEngine) RegistryValues(targets []string) ([]RegValue, error) {
 	var out []RegValue
 	roots := []string{`HKLM\SOFTWARE\`, `HKLM\SYSTEM\`, `HKLM\`}
@@ -680,11 +695,12 @@ func (e *vmmEngine) RegistryValues(targets []string) ([]RegValue, error) {
 			if err != nil || len(vals) == 0 {
 				continue
 			}
-			hive := strings.SplitN(t, `\`, 2)[0]
+			hive := hiveRoot(full)
 			lastWrite := e.keyLastWrite(full)
+			hivePath := e.hivePath(hive)
 			for _, v := range vals {
 				out = append(out, RegValue{
-					Hive: root + hive, Key: full, ValueName: v.Name,
+					Hive: hive, HivePath: hivePath, Key: full, ValueName: v.Name,
 					ValueType: regType(v.Type), ValueData: regData(v.Type, v.Data),
 					LastWrite: lastWrite,
 				})
@@ -693,6 +709,38 @@ func (e *vmmEngine) RegistryValues(targets []string) ([]RegValue, error) {
 		}
 	}
 	return out, nil
+}
+
+// hiveRoot renders a resolved key path's mount-rooted hive identity: the
+// mount plus the hive name (`HKLM\SOFTWARE` for `HKLM\SOFTWARE\Microsoft\...`).
+func hiveRoot(fullKey string) string {
+	parts := strings.SplitN(fullKey, `\`, 3)
+	if len(parts) < 2 {
+		return fullKey
+	}
+	return parts[0] + `\` + parts[1]
+}
+
+// hivePath resolves a mount-rooted hive identity to the hive's backing-file
+// rendering, "" when unresolved. The hive list (enumerated once, cached) roots
+// machine hives at `\REGISTRY\MACHINE\<NAME>`; the CMHIVE's file rendering is
+// its ShortName — the backing file path's TAIL (the info block carries at
+// most its last 32 characters, e.g. `\SystemRoot\System32\Config\SOFTWARE`
+// arrives tail-truncated).
+func (e *vmmEngine) hivePath(hiveIdentity string) string {
+	if e.hivePaths == nil {
+		e.hivePaths = map[string]string{}
+		if hives, err := e.vmm.GetRegistryHives(); err == nil {
+			const machine = `\REGISTRY\MACHINE\`
+			for _, h := range hives {
+				p := strings.ToUpper(h.Path)
+				if strings.HasPrefix(p, machine) && h.ShortName != "" {
+					e.hivePaths[`HKLM\`+p[len(machine):]] = h.ShortName
+				}
+			}
+		}
+	}
+	return e.hivePaths[strings.ToUpper(hiveIdentity)]
 }
 
 func (e *vmmEngine) Info() (map[string]string, error) {
@@ -711,11 +759,8 @@ func (e *vmmEngine) Banners() ([]string, error) {
 	return []string{fmt.Sprintf("Windows NT %d.%d build %d", maj, min, bld)}, nil
 }
 
-// Forensic collectors — TODO(on-target): read MemProcFS forensic VFS
-// (/forensic/ntfs, /forensic/csv) for MFT + ownerless files, and derive malfind
-// from the VAD map (private + executable + non-image regions).
-func (e *vmmEngine) MFT() ([]MFTRecord, error)       { return nil, nil }
-func (e *vmmEngine) FileScan() ([]FileObject, error) { return nil, nil }
+// MFT and FileScan live in carve_vmm.go — the bounded carves; the MemProcFS
+// forensic VFS is never used (its init is the upstream deadlock lane).
 
 // Malfind sweeps every process's VADs for the injection shape: committed
 // private memory, image- and file-backed excluded, with an executable

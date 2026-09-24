@@ -32,7 +32,7 @@ func collectProcesses(eng memprocfs.Engine) ([]car.Record, error) {
 			"Recovery": nilIfEmpty(p.Recovery),
 			"ExitTime": nilIfEmpty(p.ExitTime), "Unlinked": p.Unlinked,
 			"Terminated": p.Terminated, "ObjTypeChecked": p.ObjTypeChecked,
-			"ObjTypeConfirmed": p.ObjTypeConfirmed,
+			"ObjTypeConfirmed": p.ObjTypeConfirmed, "PoolOnly": p.PoolOnly,
 		})
 	}
 	return recs, nil
@@ -90,6 +90,9 @@ func collectThreads(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no MemProcFS context; the PID may even belong to a live reused process
+		}
 		ths, err := eng.Threads(p.PID)
 		if err != nil {
 			continue
@@ -119,6 +122,9 @@ func collectModules(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no MemProcFS context; the PID may even belong to a live reused process
+		}
 		mods, err := eng.Modules(p.PID)
 		if err != nil {
 			continue
@@ -146,6 +152,9 @@ func netRecords(eng memprocfs.Engine, withOwner bool) ([]car.Record, error) {
 	if withOwner {
 		if procs, err := eng.Processes(); err == nil {
 			for _, p := range procs {
+				if p.PoolOnly {
+					continue // a hidden process's PID may collide with a live one
+				}
 				pidToEP[p.PID] = p.EPROCESS
 			}
 		}
@@ -183,6 +192,9 @@ func collectFiles(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no MemProcFS context; the PID may even belong to a live reused process
+		}
 		hs, err := eng.Handles(p.PID)
 		if err != nil {
 			continue
@@ -212,6 +224,9 @@ func collectKeys(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no MemProcFS context; the PID may even belong to a live reused process
+		}
 		hs, err := eng.Handles(p.PID)
 		if err != nil {
 			continue
@@ -296,6 +311,9 @@ func collectAccess(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no MemProcFS context; the PID may even belong to a live reused process
+		}
 		hs, err := eng.Handles(p.PID)
 		if err != nil {
 			continue
@@ -324,6 +342,9 @@ func collectSessions(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, p := range procs {
+		if p.PoolOnly {
+			continue // no session facts recovered: a zero SessionId would assert session 0
+		}
 		recs = append(recs, car.Record{
 			"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "ProcessName": nilIfEmpty(p.Name),
 			"SessionId": p.SessionID, "LogonId": nilIfEmpty(p.LogonID),
@@ -425,7 +446,8 @@ func collectRegistry(eng memprocfs.Engine) ([]car.Record, error) {
 	var recs []car.Record
 	for _, v := range vals {
 		recs = append(recs, car.Record{
-			"Hive": v.Hive, "Key": v.Key, "ValueName": v.ValueName,
+			"Hive": v.Hive, "HivePath": nilIfEmpty(v.HivePath),
+			"Key": v.Key, "ValueName": v.ValueName,
 			"ValueType": nilIfEmpty(v.ValueType), "ValueData": nilIfEmpty(v.ValueData),
 			"LastWrite": nilIfEmpty(v.LastWrite),
 		})
@@ -473,7 +495,8 @@ func collectMFT(eng memprocfs.Engine) ([]car.Record, error) {
 	var recs []car.Record
 	for _, m := range rows {
 		recs = append(recs, car.Record{
-			"Record Number": m.RecordNumber, "Attribute Type": m.AttributeType,
+			"Record Number": m.RecordNumber, "Sequence Number": m.SequenceNumber,
+			"File Reference": m.FileReference, "Attribute Type": m.AttributeType,
 			"MFT Type": nilIfEmpty(m.MFTType), "Filename": nilIfEmpty(m.Filename),
 			"Created": nilIfEmpty(m.Created), "Modified": nilIfEmpty(m.Modified),
 			"Updated": nilIfEmpty(m.Updated), "Accessed": nilIfEmpty(m.Accessed),
@@ -491,7 +514,12 @@ func collectFilescan(eng memprocfs.Engine) ([]car.Record, error) {
 	}
 	var recs []car.Record
 	for _, f := range files {
-		recs = append(recs, car.Record{"Offset": f.Offset, "Name": nilIfEmpty(f.Name)})
+		// Guid spells the FILE_OBJECT the same way the handle lane mints it
+		// (file-<hex>) — one offset, one identity.
+		recs = append(recs, car.Record{
+			"Offset": f.Offset, "Guid": memprocfs.FileGUID(f.Offset),
+			"Name": nilIfEmpty(f.Name),
+		})
 	}
 	return recs, nil
 }
