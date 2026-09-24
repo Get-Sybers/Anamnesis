@@ -134,6 +134,20 @@ mappings:
       pid: PID
     keep: [Size, LoadCount, ProcessName, Company, Description, Version]
 
+  # ---- module UNLOAD events — the kernel's unloaded-module residue -----------
+  windows.anamnesis.unloaded:
+    object: module
+    action: unload
+    ts: UnloadTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {fields: [PID, Base, UnloadTime]}
+    props:
+      module_name: Name
+      base_address: Base
+      pid: PID
+    keep: [Size, Wow64, ProcessName]
+
   windows.anamnesis.network:
     variants:
       - predicate: is_bound_socket

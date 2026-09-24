@@ -62,6 +62,17 @@ type Module struct {
 	Version   string // PE VersionInfo FileVersion
 }
 
+// UnloadedModule is a module the kernel recorded as unloaded from a process
+// (MmUnloadedDrivers-style residue for user modules) — loader-tampering and
+// unhooking evidence.
+type UnloadedModule struct {
+	Base       uint64
+	Size       uint64
+	Name       string
+	UnloadTime string // ISO-8601 UTC, "" if unknown
+	Wow64      bool
+}
+
 // Thread is one thread (GetThreadList + callstack).
 type Thread struct {
 	TID                uint32
@@ -198,6 +209,7 @@ type Engine interface {
 	MFT() ([]MFTRecord, error)
 	FileScan() ([]FileObject, error)
 	Malfind() ([]MalRegion, error)
+	UnloadedModules(pid uint32) ([]UnloadedModule, error)
 	Close() error
 }
 

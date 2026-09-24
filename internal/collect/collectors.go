@@ -369,6 +369,32 @@ func collectServices(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
+// collectUnloaded -> windows.anamnesis.unloaded: the kernel's unloaded-module
+// residue per process — module/unload CAR events with a real timestamp;
+// leftover residue is unhooking/loader-tampering evidence.
+func collectUnloaded(eng memprocfs.Engine) ([]car.Record, error) {
+	procs, err := eng.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var recs []car.Record
+	for _, p := range procs {
+		mods, err := eng.UnloadedModules(p.PID)
+		if err != nil {
+			continue
+		}
+		for _, m := range mods {
+			recs = append(recs, car.Record{
+				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "Base": m.Base,
+				"Name": nilIfEmpty(m.Name), "Size": m.Size,
+				"UnloadTime": nilIfEmpty(m.UnloadTime), "Wow64": m.Wow64,
+				"ProcessName": nilIfEmpty(p.Name),
+			})
+		}
+	}
+	return recs, nil
+}
+
 // collectDrivers -> windows.modules (kernel drivers).
 func collectDrivers(eng memprocfs.Engine) ([]car.Record, error) {
 	drs, err := eng.Drivers()

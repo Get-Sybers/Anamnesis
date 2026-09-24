@@ -9,6 +9,7 @@ default_plugins:
   - windows.anamnesis.terminated
   - windows.pslist
   - windows.anamnesis.modules
+  - windows.anamnesis.unloaded
   - windows.modules
   - windows.anamnesis.network
   - windows.netstat

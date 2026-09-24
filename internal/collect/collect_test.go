@@ -45,6 +45,10 @@ func (fakeEngine) Modules(pid uint32) ([]memprocfs.Module, error) {
 	}}, nil
 }
 
+func (fakeEngine) UnloadedModules(pid uint32) ([]memprocfs.UnloadedModule, error) {
+	return nil, nil
+}
+
 func (fakeEngine) Threads(pid uint32) ([]memprocfs.Thread, error) {
 	if pid != 10 {
 		return nil, nil
