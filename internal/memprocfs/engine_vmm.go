@@ -64,6 +64,9 @@ type vmmEngine struct {
 	fpOK           bool   // the fingerprint scanner proved itself on this build
 	recHeadVA      uint64 // PsActiveProcessHead, ring-gated (anchor- or signature-recovered)
 	recHeadOK      bool
+	recKdbgVA      uint64 // KdDebuggerDataBlock, validated on its "KDBG" tag
+	recKdbgOK      bool
+	recKdbgEncoded bool // the block was found decoded in memory (false) or decoded by us (true)
 }
 
 type procRef struct {
