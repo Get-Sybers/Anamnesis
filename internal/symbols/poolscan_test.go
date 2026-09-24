@@ -86,6 +86,16 @@ func TestPoolBackScanDeltaMisses(t *testing.T) {
 	if _, ok := PoolBackScanDelta(make([]byte, 0x100), 0x1000, procTag); ok {
 		t.Error("empty window must not match")
 	}
+	// endVA smaller than the window would place its start before VA 0: the
+	// subtraction must fail closed instead of wrapping.
+	under := make([]byte, 0x200)
+	header(under, 0x1e0, []byte("Proc"))
+	if _, ok := PoolBackScanDelta(under, 0x100, procTag); ok {
+		t.Error("endVA < len(window) must fail closed, not wrap")
+	}
+	if _, ok := PoolBackScanDelta(nil, 0x1000, procTag); ok {
+		t.Error("nil window must fail closed")
+	}
 	// A header that would need bytes past the window end is out of reach.
 	window := make([]byte, 0x20)
 	copy(window[0x18:], "Proc") // tag at +0x14 of a header starting at 0x10... not aligned as tag

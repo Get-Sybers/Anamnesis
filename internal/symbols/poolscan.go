@@ -71,6 +71,9 @@ func ScanPoolTag(buf []byte, tag [4]byte) []int {
 // to turn a scanned header into a candidate object address. ok=false when no
 // header is in the window.
 func PoolBackScanDelta(window []byte, endVA uint64, tag [4]byte) (uint64, bool) {
+	if len(window) == 0 || endVA < uint64(len(window)) {
+		return 0, false // a window before VA 0 cannot exist — fail closed
+	}
 	startVA := endVA - uint64(len(window))
 	o := int((PoolChunkAlign - startVA%PoolChunkAlign) % PoolChunkAlign)
 	best := -1

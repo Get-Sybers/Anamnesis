@@ -1015,10 +1015,10 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 	for hva := range accounted {
 		headerVAs = append(headerVAs, hva)
 	}
-	core, _ := symbols.PlanPoolSweep(headerVAs, poolCoreMargin, poolCoreMergeGap, poolSweepCap)
-	full, truncated := symbols.PlanPoolSweep(headerVAs, poolSweepMargin, poolSweepMergeGap, poolSweepCap)
-	if truncated {
-		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: sweep plan exceeded the %d MiB cap and was cut short — coverage is partial\n", poolSweepCap>>20)
+	core, coreTruncated := symbols.PlanPoolSweep(headerVAs, poolCoreMargin, poolCoreMergeGap, poolSweepCap)
+	full, fullTruncated := symbols.PlanPoolSweep(headerVAs, poolSweepMargin, poolSweepMergeGap, poolSweepCap)
+	if coreTruncated || fullTruncated {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: sweep plan exceeded the %d MiB cap and was cut short (core capped: %v) — coverage is partial\n", poolSweepCap>>20, coreTruncated)
 	}
 	outer := symbols.SubtractRanges(full, core)
 	rangeBytes := func(rs []symbols.VARange) (n uint64) {
@@ -1075,8 +1075,8 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d enumerated processes had no locatable Proc header (unreadable or unheadered allocation) — outside the sweep's calibration\n", uncalibrated)
 	}
 	if matched < len(accounted) {
-		if partialCore || partialOuter {
-			fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d calibrated headers were left unswept by the expired budget\n", len(accounted)-matched)
+		if partialCore || partialOuter || coreTruncated {
+			fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d calibrated headers were left unswept by the expired budget or the capped plan\n", len(accounted)-matched)
 		} else {
 			fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d calibrated headers were NOT rediscovered by a full sweep — coverage defect, treat pool-only results as incomplete\n", len(accounted)-matched)
 		}
