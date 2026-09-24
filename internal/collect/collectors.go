@@ -333,21 +333,38 @@ func collectSessions(eng memprocfs.Engine) ([]car.Record, error) {
 	return recs, nil
 }
 
-// collectServices -> windows.svcscan (owner heuristic by pid).
+// collectServices -> windows.svcscan. A running service's host process gives
+// a definitive owner link: OwnerOffset from the PID->EPROCESS map (the
+// service's PID is the hosting process, so the same kernel-pointer identity
+// the other collectors use), not the reused PID alone.
 func collectServices(eng memprocfs.Engine) ([]car.Record, error) {
 	svcs, err := eng.Services()
 	if err != nil {
 		return nil, err
 	}
+	pidToEP := map[uint32]uint64{}
+	if procs, perr := eng.Processes(); perr == nil {
+		for _, p := range procs {
+			if p.PID != 0 && p.EPROCESS != 0 {
+				pidToEP[p.PID] = p.EPROCESS
+			}
+		}
+	}
 	var recs []car.Record
 	for _, s := range svcs {
-		recs = append(recs, car.Record{
+		r := car.Record{
 			"Offset": s.Offset, "Name": nilIfEmpty(s.Name), "PID": pidOrNil(s.PID),
 			"Binary": nilIfEmpty(s.Binary), "Binary (Registry)": nilIfEmpty(s.BinaryRegistry),
 			"Order": s.Order, "Start": nilIfEmpty(s.Start), "State": nilIfEmpty(s.State),
 			"Type": nilIfEmpty(s.Type), "Display": nilIfEmpty(s.Display), "Dll": nilIfEmpty(s.Dll),
 			"UserAccount": nilIfEmpty(s.User), "UserType": nilIfEmpty(s.UserType),
-		})
+		}
+		if s.PID != 0 {
+			if ep, ok := pidToEP[s.PID]; ok {
+				r["OwnerOffset"] = ep
+			}
+		}
+		recs = append(recs, r)
 	}
 	return recs, nil
 }
