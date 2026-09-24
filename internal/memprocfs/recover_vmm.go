@@ -53,6 +53,15 @@ type kernelCode struct {
 }
 
 func (k kernelCode) FunctionCode(name string) ([]byte, uint64, error) {
+	return k.FunctionCodeN(name, 64)
+}
+
+// FunctionCodeN reads up to n leading bytes of an exported routine — the wider
+// window symbols.RecoverGlobalVA needs.
+func (k kernelCode) FunctionCodeN(name string, n int) ([]byte, uint64, error) {
+	if n <= 0 {
+		return nil, 0, fmt.Errorf("invalid code window %d", n)
+	}
 	va, err := k.v.GetProcAddress(systemPID, "ntoskrnl.exe", name)
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve %s: %w", name, err)
@@ -60,7 +69,7 @@ func (k kernelCode) FunctionCode(name string) ([]byte, uint64, error) {
 	if va == 0 {
 		return nil, 0, fmt.Errorf("resolve %s: export not found", name)
 	}
-	code, err := k.v.MemRead(systemPID, va, 64)
+	code, err := k.v.MemRead(systemPID, va, uint32(n))
 	if err != nil {
 		return nil, 0, fmt.Errorf("read %s at %#x: %w", name, va, err)
 	}
@@ -197,12 +206,33 @@ func (e *vmmEngine) recoverPrePass() {
 		}
 	}
 
+	// ObHeaderCookie: keyless recovery of the _OBJECT_HEADER.TypeIndex key
+	// (§7). The reference VA is build-stable (cached in the store, seedable);
+	// the cookie value is per-boot random, so it is re-read and gated from
+	// this image on every load. Enables correct object typing for future
+	// pool/handle scanning — no user-visible field yet.
+	cookieRef := symbols.KernelGlobals[0] // ObGetObjectType -> ObHeaderCookie
+	cookieVA, haveCookieVA := entry.Global(cookieRef.Global)
+	if !haveCookieVA {
+		if va, found := symbols.RecoverGlobalVA(kernelCode{e.vmm}, cookieRef); found {
+			cookieVA, haveCookieVA = va, true
+			if symbols.MergeGlobal(entry, symbols.RecoveredGlobal{Name: cookieRef.Global, VA: va, Confidence: symbols.BestEffort}) {
+				dirty = true
+			}
+			fmt.Fprintf(os.Stderr, "[anamnesis] recovered %s reference VA %#x (guid=%s age=%d)\n", cookieRef.Global, va, key.GUID, key.Age)
+		}
+	}
+
 	if dirty && len(entry.Offsets) > 0 {
 		if dir := e.writableStoreDir(); dir != "" {
 			if werr := symbols.WriteStoredOffsets(dir, *entry); werr != nil {
 				fmt.Fprintf(os.Stderr, "[anamnesis] offset store write failed: %v\n", werr)
 			}
 		}
+	}
+
+	if haveCookieVA {
+		e.gateObCookie(cookieVA)
 	}
 
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
@@ -412,6 +442,63 @@ const (
 
 // stillActiveStatus is the NTSTATUS a live process's ExitStatus holds.
 const stillActiveStatus = 0x103
+
+const (
+	// objHeaderBody is how far the object body sits past its _OBJECT_HEADER on
+	// x64 (the common-header size); objHeaderTypeIndex is TypeIndex within the
+	// header. Stable across Win10/11 x64; a wrong value simply fails the gate.
+	objHeaderBody      = 0x30
+	objHeaderTypeIndex = 0x18
+	// maxObjectType bounds a plausible decoded TypeIndex (there are far fewer
+	// than this many object types); index 0/1 are not real object types.
+	maxObjectType = 80
+)
+
+// gateObCookie accepts the candidate ObHeaderCookie only if it deobfuscates
+// two independent kernel objects — the System process and its primary token —
+// to plausible, distinct TypeIndex values (§9: consensus, never one view). A
+// wrong cookie XORs to a value that rarely lands both in range; a right one
+// always does. On pass it enables object typing for this image.
+func (e *vmmEngine) gateObCookie(cookieVA uint64) {
+	cb, err := e.vmm.MemRead(systemPID, cookieVA, 1)
+	if err != nil || len(cb) < 1 {
+		return
+	}
+	cookie := cb[0]
+	pi, err := e.vmm.GetProcessInfo(systemPID)
+	if err != nil || pi == nil || pi.Win.EPROCESS == 0 {
+		return
+	}
+	procIdx, ok := e.objTypeIndex(pi.Win.EPROCESS, cookie)
+	if !ok || procIdx < 2 || procIdx > maxObjectType {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (System process index implausible) — deobfuscation disabled\n", cookie)
+		return
+	}
+	// Second object: the System process's primary token, if its offset resolved.
+	if e.recTokenOK {
+		if tb, terr := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(e.recTokenOffset), 8); terr == nil && len(tb) >= 8 {
+			if token := leU64(tb) & exFastRefMask; token >= kernelVAFloor {
+				tokIdx, tok := e.objTypeIndex(token, cookie)
+				if !tok || tokIdx < 2 || tokIdx > maxObjectType || tokIdx == procIdx {
+					fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (token index implausible or equal to process) — deobfuscation disabled\n", cookie)
+					return
+				}
+			}
+		}
+	}
+	e.recObCookie, e.recObCookieOK = cookie, true
+	fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie validated (System process TypeIndex=%d) — object typing enabled\n", procIdx)
+}
+
+// objTypeIndex deobfuscates the TypeIndex of the object at objVA using cookie.
+func (e *vmmEngine) objTypeIndex(objVA uint64, cookie uint8) (uint8, bool) {
+	headerVA := objVA - objHeaderBody
+	b, err := e.vmm.MemRead(systemPID, headerVA+objHeaderTypeIndex, 1)
+	if err != nil || len(b) < 1 {
+		return 0, false
+	}
+	return symbols.DecodeTypeIndex(b[0], headerVA, cookie), true
+}
 
 // systemQwordAt reads one qword of the System process's _EPROCESS at the
 // candidate offset; 0 on any failure.

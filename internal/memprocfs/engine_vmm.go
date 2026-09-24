@@ -52,6 +52,8 @@ type vmmEngine struct {
 	linkedCache    map[uint32]bool
 	handleCache    map[uint32][]Handle
 	userBySID      map[string]string
+	recObCookie    uint8
+	recObCookieOK  bool
 }
 
 type procRef struct {
