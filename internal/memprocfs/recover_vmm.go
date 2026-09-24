@@ -925,7 +925,7 @@ func (e *vmmEngine) readQword(va uint64) (uint64, bool) {
 }
 
 // procPoolTag is the kernel pool tag on an _EPROCESS allocation.
-const procPoolTag = "Proc"
+var procPoolTag = [4]byte{'P', 'r', 'o', 'c'}
 
 // poolScanProcesses independently discovers process objects by kernel pool tag
 // ("Proc"), a DKOM-resistant view: a process unlinked from ActiveProcessLinks
@@ -942,6 +942,7 @@ const procPoolTag = "Proc"
 // now: the cross-check is evidence, not yet a user-visible field.
 func (e *vmmEngine) poolScanProcesses() []uint64 {
 	if !e.recObCookieOK || !e.recPIDOK {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan skipped: candidate typing unavailable (ObHeaderCookie ok=%v, PID offset ok=%v)\n", e.recObCookieOK, e.recPIDOK)
 		return nil
 	}
 	pl, err := e.vmm.GetPoolList(mp.PoolMapFlagAll)
@@ -956,7 +957,7 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 	var procAllocs []span
 	for i := range pl.Entries {
 		en := &pl.Entries[i]
-		if en.Alloc && string(en.Tag[:]) == procPoolTag {
+		if en.Alloc && en.Tag == procPoolTag {
 			procAllocs = append(procAllocs, span{en.Va, en.Va + uint64(en.Size)})
 		}
 	}

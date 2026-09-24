@@ -246,11 +246,22 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	// stays off the default lane until a deadlock-safe enumeration lands. Where
 	// enabled, it is evidence (logged); pool-only candidates are the seed of a
 	// future hidden-process surface.
-	if os.Getenv("ANAMNESIS_POOLSCAN") != "" {
+	if poolScanEnabled() {
 		e.poolScanProcesses()
 	}
 	e.procCache = out
 	return out, nil
+}
+
+// poolScanEnabled reports whether ANAMNESIS_POOLSCAN opts in to the pool-tag
+// scan, parsed as a real toggle so an explicit "0"/"false" from automation
+// stays off (matching the batch runner's env-bool convention).
+func poolScanEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ANAMNESIS_POOLSCAN"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // exitTimeISO reads _EPROCESS.ExitTime — adjacent to CreateTime on every
