@@ -419,7 +419,8 @@ func (e *vmmEngine) UnloadedModules(pid uint32) ([]UnloadedModule, error) {
 	for _, m := range ul.Modules {
 		out = append(out, UnloadedModule{
 			Base: m.BaseAddress, Size: uint64(m.ImageSize), Name: m.Name,
-			UnloadTime: fileTimeToISO(m.UnloadTime), Wow64: m.IsWow64,
+			UnloadTime: fileTimeToISO(m.UnloadTime), UnloadRaw: m.UnloadTime,
+			Wow64: m.IsWow64,
 		})
 	}
 	return out, nil

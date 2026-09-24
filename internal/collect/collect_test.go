@@ -46,7 +46,16 @@ func (fakeEngine) Modules(pid uint32) ([]memprocfs.Module, error) {
 }
 
 func (fakeEngine) UnloadedModules(pid uint32) ([]memprocfs.UnloadedModule, error) {
-	return nil, nil
+	if pid != 10 {
+		return nil, nil
+	}
+	// One timestamped entry and one whose unload time the kernel never
+	// stamped — the guid must survive both (UnloadRaw 0, never nil).
+	return []memprocfs.UnloadedModule{
+		{Base: 0x9000, Size: 0x1000, Name: "evil.dll",
+			UnloadTime: "2020-01-01T00:00:30+00:00", UnloadRaw: 132223104300000000},
+		{Base: 0xA000, Size: 0x2000, Name: "gone.dll"},
+	}, nil
 }
 
 func (fakeEngine) Threads(pid uint32) ([]memprocfs.Thread, error) {
@@ -170,9 +179,32 @@ func TestCollectorsToCarDB(t *testing.T) {
 		}
 	}
 	assertDefinitive("thread")
-	assertDefinitive("module")
 	assertDefinitive("file")
 	assertDefinitive("flow")
+
+	// module: 1 load + 2 unload rows; every unload keeps a guid even with no
+	// recorded unload time (UnloadRaw 0 is a legitimate component), and the
+	// owner link stays definitive.
+	modRows, _ := st.IterObject("module")
+	loads, unloads := 0, 0
+	for _, e := range modRows {
+		switch e["car_action"] {
+		case "load":
+			loads++
+		case "unload":
+			unloads++
+			if value.Str(e["guid"]) == "" {
+				t.Errorf("module/unload row has no guid: %v", e)
+			}
+			if value.Str(e["owning_guid"]) != memprocfs.ProcGUID(epP1) ||
+				value.Str(e["link_confidence"]) != "definitive" {
+				t.Errorf("module/unload owner=%v conf=%v", e["owning_guid"], e["link_confidence"])
+			}
+		}
+	}
+	if loads != 1 || unloads != 2 {
+		t.Fatalf("module rows: %d load, %d unload (want 1, 2)", loads, unloads)
+	}
 
 	counts, _ := st.Counts()
 	if counts["driver"] != 1 || counts["service"] != 1 {

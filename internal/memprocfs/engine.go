@@ -76,6 +76,7 @@ type UnloadedModule struct {
 	Size       uint64
 	Name       string
 	UnloadTime string // ISO-8601 UTC, "" if unknown
+	UnloadRaw  uint64 // the raw FILETIME (0 if unknown) — a never-nil guid component
 	Wow64      bool
 }
 

@@ -141,12 +141,14 @@ mappings:
     ts: UnloadTime
     owning_pid: PID
     owning_offset: OwnerOffset
-    guid: {fields: [PID, Base, UnloadTime]}
+    # UnloadRaw (0 = unknown) keeps the guid stable: a nil component voids a
+    # fields-guid, and most residue entries carry no unload time.
+    guid: {fields: [PID, Base, UnloadRaw]}
     props:
       module_name: Name
       base_address: Base
       pid: PID
-    keep: [Size, Wow64, ProcessName]
+    keep: [Size, Wow64, ProcessName, UnloadRaw]
 
   windows.anamnesis.network:
     variants:

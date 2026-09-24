@@ -388,8 +388,11 @@ func collectUnloaded(eng memprocfs.Engine) ([]car.Record, error) {
 			recs = append(recs, car.Record{
 				"OwnerOffset": p.EPROCESS, "PID": int(p.PID), "Base": m.Base,
 				"Name": nilIfEmpty(m.Name), "Size": m.Size,
-				"UnloadTime": nilIfEmpty(m.UnloadTime), "Wow64": m.Wow64,
-				"ProcessName": nilIfEmpty(p.Name),
+				// UnloadTime nils when unknown (the display/ts field); UnloadRaw
+				// is the never-nil guid component (0 = unknown), because a nil
+				// component voids a fields-guid in normalize.
+				"UnloadTime": nilIfEmpty(m.UnloadTime), "UnloadRaw": m.UnloadRaw,
+				"Wow64": m.Wow64, "ProcessName": nilIfEmpty(p.Name),
 			})
 		}
 	}
