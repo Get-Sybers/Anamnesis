@@ -23,16 +23,26 @@ import (
 	"anamnesis/internal/symbols"
 )
 
+const usage = "usage: symrec <ntoskrnl.exe>  |  symrec -store <dir> <pe>...  |  symrec -fingerprint <dir> <pe> <routine> <global> [byte]"
+
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "-store" {
 		if len(os.Args) < 4 { // -store needs a dir AND at least one PE
-			fmt.Fprintln(os.Stderr, "usage: symrec <ntoskrnl.exe>  |  symrec -store <dir> <pe>...")
+			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
 		}
 		os.Exit(seed(os.Args[2], os.Args[3:]))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "-fingerprint" {
+		// -fingerprint <dir> <pe> <routine> <global> [byte]
+		if len(os.Args) < 6 {
+			fmt.Fprintln(os.Stderr, usage)
+			os.Exit(2)
+		}
+		os.Exit(harvest(os.Args[2], os.Args[3], os.Args[4], os.Args[5], len(os.Args) > 6 && os.Args[6] == "byte"))
+	}
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: symrec <ntoskrnl.exe>  |  symrec -store <dir> <pe>...")
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
 	img, err := symbols.OpenPE(os.Args[1])
@@ -115,4 +125,35 @@ func seedOne(dir, path string) error {
 	fmt.Fprintf(os.Stderr, "symrec: seeded %d/%d offsets (guid=%s age=%d)\n",
 		len(entry.Offsets), len(symbols.ProcessAccessors), guid, age)
 	return nil
+}
+
+// harvest authors a fingerprint signature for a routine referencing a global
+// from a reference kernel PE and writes it into the signature store. routine
+// is resolved by export name; global is the name the routine's first RIP
+// operand references. The signature masks the disp32, so it generalizes
+// across builds. (Non-exported routines, addressed by RVA, come with the
+// in-image anchor-recovery slice.)
+func harvest(dir, pePath, routine, global string, byteOperand bool) int {
+	img, err := symbols.OpenPE(pePath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "symrec: open:", err)
+		return 1
+	}
+	code, _, err := img.FunctionCodeN(routine, 96)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "symrec: %s: %v\n", routine, err)
+		return 1
+	}
+	sig, ok := symbols.BuildSignature(routine, global, code, byteOperand)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "symrec: %s: no RIP-relative operand to key a signature on\n", routine)
+		return 1
+	}
+	if err := symbols.WriteSignature(dir, "ntoskrnl.exe", sig); err != nil {
+		fmt.Fprintln(os.Stderr, "symrec: write:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "symrec: harvested %s -> %s signature (%d bytes, disp32 wildcarded)\n",
+		routine, global, len(sig.Pattern))
+	return 0
 }
