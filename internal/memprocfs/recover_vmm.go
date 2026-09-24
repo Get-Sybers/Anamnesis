@@ -474,17 +474,27 @@ func (e *vmmEngine) gateObCookie(cookieVA uint64) {
 		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (System process index implausible) — deobfuscation disabled\n", cookie)
 		return
 	}
-	// Second object: the System process's primary token, if its offset resolved.
-	if e.recTokenOK {
-		if tb, terr := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(e.recTokenOffset), 8); terr == nil && len(tb) >= 8 {
-			if token := leU64(tb) & exFastRefMask; token >= kernelVAFloor {
-				tokIdx, tok := e.objTypeIndex(token, cookie)
-				if !tok || tokIdx < 2 || tokIdx > maxObjectType || tokIdx == procIdx {
-					fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (token index implausible or equal to process) — deobfuscation disabled\n", cookie)
-					return
-				}
-			}
-		}
+	// Second object, REQUIRED: the System process's primary token. Consensus
+	// means two views or none — a cookie that cannot be cross-checked is not
+	// accepted on the process index alone.
+	if !e.recTokenOK {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x has no second object to validate against (token offset unresolved) — deobfuscation disabled\n", cookie)
+		return
+	}
+	tb, terr := e.vmm.MemRead(systemPID, pi.Win.EPROCESS+uint64(e.recTokenOffset), 8)
+	if terr != nil || len(tb) < 8 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x: token pointer unreadable — deobfuscation disabled\n", cookie)
+		return
+	}
+	token := leU64(tb) & exFastRefMask
+	if token < kernelVAFloor {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x: token pointer implausible — deobfuscation disabled\n", cookie)
+		return
+	}
+	tokIdx, tok := e.objTypeIndex(token, cookie)
+	if !tok || tokIdx < 2 || tokIdx > maxObjectType || tokIdx == procIdx {
+		fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie %#x failed the object-type gate (token index implausible or equal to process) — deobfuscation disabled\n", cookie)
+		return
 	}
 	e.recObCookie, e.recObCookieOK = cookie, true
 	fmt.Fprintf(os.Stderr, "[anamnesis] ObHeaderCookie validated (System process TypeIndex=%d) — object typing enabled\n", procIdx)

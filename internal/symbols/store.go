@@ -132,8 +132,8 @@ func Merge(base *StoreEntry, key StoreKey, offsets []RecoveredOffset, undecodabl
 		Offsets: sortedOffsets(byFunc), Undecodable: sortedKeys(undec),
 		Source: source, Created: created, Updated: now,
 	}
-	if base != nil { // globals are carried through convergence; MergeGlobal adds them
-		out.Globals = base.Globals
+	if base != nil { // globals carry through convergence (copied — Merge must not alias base)
+		out.Globals = append([]RecoveredGlobal(nil), base.Globals...)
 	}
 	return out, improved
 }
