@@ -1180,8 +1180,8 @@ func (e *vmmEngine) imageNameAt(ep uint64, off uint32) string {
 		ep = pi.Win.EPROCESS
 	}
 	b, err := e.vmm.MemRead(systemPID, ep+uint64(off), 15)
-	if err != nil {
-		return ""
+	if err != nil || len(b) < 15 {
+		return "" // a short read could pass a truncated name through the gate
 	}
 	n := 0
 	for n < len(b) && b[n] != 0 {

@@ -87,7 +87,7 @@ func ParseMFTRecord(rec []byte) (MFTEntry, bool) {
 	// the real words in place). All tails == USN means protected: substitute
 	// the USA words. No tail == USN means fixed-up: use the bytes as they
 	// are. A mix means the record is torn across pages — reject.
-	fixed := append([]byte(nil), rec...)
+	fixed := rec
 	usn := binary.LittleEndian.Uint16(rec[usaOff:])
 	protected := 0
 	for i := 0; i < usaCount-1; i++ {
@@ -97,12 +97,15 @@ func ParseMFTRecord(rec []byte) (MFTEntry, bool) {
 	}
 	switch protected {
 	case usaCount - 1:
+		// Substitute on a copy — the caller's buffer is never mutated, and
+		// the fixed-up case (the common cache shape) costs no clone at all.
+		fixed = append([]byte(nil), rec...)
 		for i := 0; i < usaCount-1; i++ {
 			tail := (i+1)*mftSectorSize - 2
 			copy(fixed[tail:tail+2], rec[usaOff+2+2*i:])
 		}
 	case 0:
-		// fixed-up in place — nothing to substitute
+		// fixed-up in place — parse as-is
 	default:
 		return e, false // torn across cache pages
 	}
