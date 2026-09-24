@@ -943,7 +943,11 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 		return nil
 	}
 	pl, err := e.vmm.GetPoolList(mp.PoolMapFlagAll)
-	if err != nil || pl == nil {
+	if err != nil || pl == nil || pl.Count == 0 {
+		// The pool map is built by MemProcFS's pool subsystem, which needs the
+		// forensic mode that a stripped or crash-dump image can decline; say so
+		// rather than skip in silence.
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: pool map unavailable (err=%v) — DKOM-resistant process scan skipped\n", err)
 		return nil
 	}
 	type span struct{ va, end uint64 }
@@ -955,6 +959,7 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 		}
 	}
 	if len(procAllocs) == 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d pool allocations but no \"Proc\" tag — scan inconclusive\n", pl.Count)
 		return nil
 	}
 	containing := func(ep uint64) (uint64, bool) {
