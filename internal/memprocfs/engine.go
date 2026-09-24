@@ -36,6 +36,17 @@ type Process struct {
 	// "command_line=peb+0x60_anchor;sid=sidraw"); "" when the PDB-backed
 	// reads served everything.
 	Recovery string
+	// ExitTime is set for a process whose _EPROCESS records an end
+	// (ISO-8601 UTC, "" while running or unknown).
+	ExitTime string
+	// Unlinked reports the raw ActiveProcessLinks contrast: the process was
+	// detected but is not on the kernel's active-process ring. An exited
+	// process is legitimately unlinked; Hidden is the consensus verdict on
+	// top (unlinked AND still running by every read).
+	Unlinked bool
+	// Terminated is MemProcFS's own state marking (ProcessInfo.State != 0) —
+	// the reason a process can be detected yet absent from the PID list.
+	Terminated bool
 }
 
 // Module is one loaded module in a process (GetModuleList).

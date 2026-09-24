@@ -41,6 +41,14 @@ type vmmEngine struct {
 	recSource      string
 	recTokenOffset uint32
 	recTokenOK     bool
+	recPIDOffset   uint32
+	recPIDOK       bool
+	recExitOffset  uint32
+	recExitOK      bool
+	recLinksOffset uint32
+	recLinksOK     bool
+	linkedOnce     bool
+	linkedCache    map[uint32]bool
 	userBySID      map[string]string
 }
 
@@ -192,6 +200,8 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 		if pi.Win.LUID != 0 {
 			p.LogonID = fmt.Sprintf("0x%x", pi.Win.LUID)
 		}
+		p.Terminated = pi.State != 0
+		p.ExitTime = e.exitTimeISO(pi.Win.EPROCESS)
 		e.fillProcess(&p, pi)
 		if p.Path != "" {
 			pathByPID[pi.PID] = p.Path
@@ -202,14 +212,44 @@ func (e *vmmEngine) Processes() ([]Process, error) {
 	for i := range out {
 		out[i].ParentPath = pathByPID[out[i].PPID]
 	}
+	// The raw ActiveProcessLinks contrast, surfaced as is — the analyst sees
+	// every unlinked process; Hidden (ActivePIDs) is the consensus verdict.
+	if linked := e.linkedPIDs(); linked != nil {
+		for i := range out {
+			if out[i].PID != 0 && !linked[out[i].PID] {
+				out[i].Unlinked = true
+			}
+		}
+	}
 	e.procCache = out
 	return out, nil
 }
 
-// ActivePIDs: MemProcFS detects processes with multiple methods and does not
-// cleanly separate the active list from scanned-only ones, so every detected PID
-// is reported active (Hidden stays false). TODO(on-target): derive the active
-// PsActiveProcessHead list to restore the Hidden contrast.
+// exitTimeISO reads _EPROCESS.ExitTime — adjacent to CreateTime on every
+// known x64 build — through the resolved CreateTime offset; "" while
+// running, unknown, or implausible.
+func (e *vmmEngine) exitTimeISO(eprocess uint64) string {
+	if !e.ctOK || eprocess == 0 {
+		return ""
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset)+8, 8)
+	if err != nil || len(b) < 8 {
+		return ""
+	}
+	ft := leU64(b)
+	if ft == 0 || (e.ctSource != "pdb" && !plausibleFileTime(ft)) {
+		return ""
+	}
+	return fileTimeToISO(ft)
+}
+
+// ActivePIDs reports each detected PID's presence on the kernel's
+// ActiveProcessLinks ring — the pslist/psscan contrast. A detected process
+// that is absent from the ring while its ExitStatus still reads STILL_ACTIVE
+// is marked inactive (the collector's Hidden flag — the DKOM-unlinking
+// primitive of docs/design/symbol-recovery.md §9); an exited process is just
+// exited, never hidden. When the recovered offsets are unavailable every PID
+// reports active, the honest no-contrast fallback.
 func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 	pids, err := e.vmm.GetPidList()
 	if err != nil {
@@ -219,7 +259,58 @@ func (e *vmmEngine) ActivePIDs() (map[uint32]bool, error) {
 	for _, p := range pids {
 		m[p] = true
 	}
+	procs, perr := e.Processes() // runs the recovery pre-pass; cached
+	if perr != nil {
+		return m, nil
+	}
+	// Every detected process defaults to active — a PID absent from the pid
+	// list (MemProcFS marks it terminated) must not read as hidden by key
+	// absence; only the consensus below may say hidden.
+	for i := range procs {
+		if _, ok := m[procs[i].PID]; !ok {
+			m[procs[i].PID] = true
+		}
+	}
+	linked := e.linkedPIDs()
+	if linked == nil {
+		return m, nil
+	}
+	for i := range procs {
+		p := &procs[i]
+		if p.PID == 0 || linked[p.PID] {
+			continue
+		}
+		// Consensus before the accusation (§9): an unlinked process is Hidden
+		// only when three independent reads agree it is still running —
+		// ExitStatus STILL_ACTIVE, ExitTime zero, and at least one thread.
+		// A lingering exited EPROCESS (userinit, acquisition smear) fails
+		// those and is just exited, never hidden.
+		if e.stillActive(p.EPROCESS) && !e.exited(p.EPROCESS) && e.hasThreads(p.PID) {
+			m[p.PID] = false
+		}
+	}
 	return m, nil
+}
+
+// exited reads _EPROCESS.ExitTime — adjacent to CreateTime on every known
+// x64 build — through the recovered offset; nonzero means the process ended.
+// Without a CreateTime offset the answer is unknown and reads as exited, so
+// Hidden is never claimed on missing evidence.
+func (e *vmmEngine) exited(eprocess uint64) bool {
+	if !e.ctOK || eprocess == 0 {
+		return true
+	}
+	b, err := e.vmm.MemRead(systemPID, eprocess+uint64(e.ctOffset)+8, 8)
+	if err != nil || len(b) < 8 {
+		return true
+	}
+	return leU64(b) != 0
+}
+
+// hasThreads reports whether the process still owns at least one thread.
+func (e *vmmEngine) hasThreads(pid uint32) bool {
+	tl, err := e.vmm.GetThreadList(pid)
+	return err == nil && tl != nil && len(tl.Threads) > 0
 }
 
 func (e *vmmEngine) str(pid uint32, opt mp.ProcessInfoStringOptions) string {
