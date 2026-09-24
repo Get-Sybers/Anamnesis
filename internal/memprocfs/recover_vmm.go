@@ -927,83 +927,137 @@ func (e *vmmEngine) readQword(va uint64) (uint64, bool) {
 // procPoolTag is the kernel pool tag on an _EPROCESS allocation.
 var procPoolTag = [4]byte{'P', 'r', 'o', 'c'}
 
+// Bounded pool-sweep tuning. The sweep ranges are planned from the enumerated
+// processes' own pool headers and swept in two passes, core first: the core
+// pass tightly covers every calibrated header (poolCoreMargin/poolCoreMergeGap
+// — the parity set the cross-check depends on), the outer pass widens by
+// poolSweepMargin and merges across gaps up to poolSweepMergeGap — hidden
+// processes are allocated by the same pool backend into the same segments as
+// the visible ones, so the widened hull is where they live. poolSweepCap
+// bounds the total bytes swept (the plan self-shrinks under it);
+// poolBackScanWindow bounds the per-process header search (the header sits a
+// few chunks before the body). Time is bounded separately by the scan budget
+// (poolScanBudget), spent core-first, because byte-bounded reads are not
+// time-bounded: the same sweep measured 42s warm-cache and 300s+ cold on one
+// crash dump (LeechCore seeks per page on a bitmap dump), and a scan slower
+// than the stall watchdog would cost the whole collector.
+const (
+	poolCoreMargin     = 1 << 20
+	poolCoreMergeGap   = 8 << 20
+	poolSweepMargin    = 64 << 20
+	poolSweepMergeGap  = 256 << 20
+	poolSweepCap       = 8 << 30
+	poolSweepChunk     = 1 << 20
+	poolBackScanWindow = 0x200
+)
+
 // poolScanProcesses independently discovers process objects by kernel pool tag
 // ("Proc"), a DKOM-resistant view: a process unlinked from ActiveProcessLinks
 // or otherwise hidden from the normal walk still owns its tagged allocation.
-// Each candidate is TYPED via the recovered ObHeaderCookie (its
-// _OBJECT_HEADER.TypeIndex must decode to the Process type index) and gated on
-// a plausible PID, so a false pool hit is discarded rather than reported. The
-// result is cross-checked against the enumerated set; any allocation that
-// resolves to a valid Process object the enumeration missed is returned and
-// logged. A no-op without cookie typing or the PID offset — the gates that
-// make a candidate trustworthy. Called only under ANAMNESIS_POOLSCAN: its one
-// new dependency, GetPoolList, can deadlock on some crash-dump images (the
-// MemProcFS pool subsystem), so it is kept off the default lane. Internal for
-// now: the cross-check is evidence, not yet a user-visible field.
+// The enumeration is the engine's own bounded sweep — chunked MemReadEx over
+// planned ranges, a tag match at pool-chunk alignment — never the MemProcFS
+// pool map (GetPoolList), which deadlocks on some crash-dump images. Every
+// read is byte-bounded and the sweep as a whole is time-budgeted, so the scan
+// can sit on the default lane: it degrades loudly, never stalls the
+// collector. Each candidate is
+// TYPED via the recovered ObHeaderCookie (its _OBJECT_HEADER.TypeIndex must
+// decode to the Process type index) and gated on a plausible PID, so a false
+// hit — text or stale data echoing the tag — is discarded rather than
+// reported. The result is cross-checked against the enumerated set; any
+// header that resolves to a valid Process object the enumeration missed is
+// returned and logged. A no-op without cookie typing or the PID offset — the
+// gates that make a candidate trustworthy. Internal for now: the cross-check
+// is evidence, not yet a user-visible field.
 func (e *vmmEngine) poolScanProcesses() []uint64 {
 	if !e.recObCookieOK || !e.recPIDOK {
 		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan skipped: candidate typing unavailable (ObHeaderCookie ok=%v, PID offset ok=%v)\n", e.recObCookieOK, e.recPIDOK)
 		return nil
 	}
-	pl, err := e.vmm.GetPoolList(mp.PoolMapFlagAll)
-	if err != nil || pl == nil || pl.Count == 0 {
-		// The pool map is built by MemProcFS's pool subsystem, which needs the
-		// forensic mode that a stripped or crash-dump image can decline; say so
-		// rather than skip in silence.
-		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: pool map unavailable (err=%v) — DKOM-resistant process scan skipped\n", err)
+	if len(e.epToProc) == 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan skipped: no enumerated processes to calibrate against\n")
 		return nil
 	}
-	type span struct{ va, end uint64 }
-	var procAllocs []span
-	for i := range pl.Entries {
-		en := &pl.Entries[i]
-		if en.Alloc && en.Tag == procPoolTag {
-			procAllocs = append(procAllocs, span{en.Va, en.Va + uint64(en.Size)})
-		}
-	}
-	if len(procAllocs) == 0 {
-		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d pool allocations but no \"Proc\" tag — scan inconclusive\n", pl.Count)
-		return nil
-	}
-	containing := func(ep uint64) (uint64, bool) {
-		for _, a := range procAllocs {
-			if ep >= a.va && ep < a.end {
-				return a.va, true
-			}
-		}
-		return 0, false
-	}
-	// Calibrate the allocation -> _EPROCESS body delta(s) from the enumerated
-	// processes: the offset is build-stable (the optional-header layout is
-	// near-uniform for processes), and reading it off ground truth needs no
-	// symbols. accounted marks each allocation already tied to a known process.
+	// Calibrate the header -> _EPROCESS body delta(s) off ground truth: each
+	// enumerated process's own header is a bounded back-scan away from its
+	// body (the offset is build-stable, and reading it needs no symbols).
+	// accounted maps each header already tied to a known process.
 	deltas := map[uint64]int{}
 	accounted := map[uint64]bool{}
 	for ep := range e.epToProc {
-		if va, ok := containing(ep); ok {
-			deltas[ep-va]++
-			accounted[va] = true
+		if ep < kernelVAFloor {
+			continue
+		}
+		b, ok := e.readPadded(ep-poolBackScanWindow, poolBackScanWindow)
+		if !ok {
+			continue
+		}
+		if d, ok := symbols.PoolBackScanDelta(b, ep, procPoolTag); ok {
+			deltas[d]++
+			accounted[ep-d] = true
 		}
 	}
 	if len(deltas) == 0 {
-		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d Proc allocations, none containing an enumerated _EPROCESS — delta uncalibrated, skipped\n", len(procAllocs))
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: no Proc header behind any of the %d enumerated _EPROCESS bodies — delta uncalibrated, scan skipped\n", len(e.epToProc))
 		return nil
 	}
+	uncalibrated := len(e.epToProc) - len(accounted)
 	dlist := make([]uint64, 0, len(deltas))
 	for d := range deltas {
 		dlist = append(dlist, d)
 	}
 	sort.Slice(dlist, func(i, j int) bool { return deltas[dlist[i]] > deltas[dlist[j]] })
 
+	// Plan the sweep: a core pass tightly covering every calibrated header,
+	// then the widened discovery hull minus what the core already covers.
+	// The budget is spent in that order, so a slow image degrades to reduced
+	// discovery margins — never to a failed cross-check or a stalled collector.
+	headerVAs := make([]uint64, 0, len(accounted))
+	for hva := range accounted {
+		headerVAs = append(headerVAs, hva)
+	}
+	core, _ := symbols.PlanPoolSweep(headerVAs, poolCoreMargin, poolCoreMergeGap, poolSweepCap)
+	full, truncated := symbols.PlanPoolSweep(headerVAs, poolSweepMargin, poolSweepMergeGap, poolSweepCap)
+	if truncated {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: sweep plan exceeded the %d MiB cap and was cut short — coverage is partial\n", poolSweepCap>>20)
+	}
+	outer := symbols.SubtractRanges(full, core)
+	rangeBytes := func(rs []symbols.VARange) (n uint64) {
+		for _, r := range rs {
+			n += r.End - r.Start
+		}
+		return n
+	}
+	budget := poolScanBudget()
+	var deadline time.Time
+	if budget > 0 {
+		deadline = time.Now().Add(budget)
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: sweeping core %d MiB + discovery %d MiB, budget %v (calibrated from %d headers, deltas %#x)\n",
+		rangeBytes(core)>>20, rangeBytes(outer)>>20, budget, len(accounted), dlist)
+	hits, sweptCore, partialCore := e.sweepPoolTag(core, procPoolTag, deadline)
+	hitsOuter, sweptOuter, partialOuter := e.sweepPoolTag(outer, procPoolTag, deadline)
+	hits = append(hits, hitsOuter...)
+	if partialCore || partialOuter {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: time budget %v expired after %d/%d MiB — coverage is partial, pool-only results incomplete (raise ANAMNESIS_POOLSCAN_BUDGET to sweep fully)\n",
+			budget, (sweptCore+sweptOuter)>>20, rangeBytes(core)>>20+rangeBytes(outer)>>20)
+	}
+
+	// Classify: headers the enumeration accounts for confirm parity; the rest
+	// are candidates that must survive typing and the PID gate.
+	matched := 0
 	var poolOnly []uint64
-	for _, a := range procAllocs {
-		if accounted[a.va] {
+	for _, hva := range hits {
+		if accounted[hva] {
+			matched++
 			continue
 		}
 		for _, d := range dlist {
-			ep := a.va + d
-			if ep < kernelVAFloor || ep >= a.end {
+			ep := hva + d
+			if ep < kernelVAFloor {
 				continue
+			}
+			if _, known := e.epToProc[ep]; known {
+				break // an enumerated body whose header the calibration mislocated — not pool-only
 			}
 			if idx, ok := e.objTypeIndex(ep, e.recObCookie); !ok || idx != e.recProcTypeIdx {
 				continue // not a Process object at this delta
@@ -1015,13 +1069,67 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 			break
 		}
 	}
-	fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d Proc allocations, %d matched the enumerated set + %d pool-only Process objects (ObHeaderCookie-typed)\n",
-		len(procAllocs), len(accounted), len(poolOnly))
+	fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan (bounded sweep, %d MiB swept): %d tag hits, %d/%d enumerated headers confirmed + %d pool-only Process objects (ObHeaderCookie-typed)\n",
+		(sweptCore+sweptOuter)>>20, len(hits), matched, len(accounted), len(poolOnly))
+	if uncalibrated > 0 {
+		fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d enumerated processes had no locatable Proc header (unreadable or unheadered allocation) — outside the sweep's calibration\n", uncalibrated)
+	}
+	if matched < len(accounted) {
+		if partialCore || partialOuter {
+			fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d calibrated headers were left unswept by the expired budget\n", len(accounted)-matched)
+		} else {
+			fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: %d calibrated headers were NOT rediscovered by a full sweep — coverage defect, treat pool-only results as incomplete\n", len(accounted)-matched)
+		}
+	}
 	for _, ep := range poolOnly {
 		pid := e.readDword(ep + uint64(e.recPIDOffset))
 		fmt.Fprintf(os.Stderr, "[anamnesis]   pool-only process _EPROCESS %#x pid=%d — present in pool, absent from the enumerated set\n", ep, pid)
 	}
 	return poolOnly
+}
+
+// sweepPoolTag reads the planned ranges in bounded chunks (holes zero-padded,
+// never fatal) and returns the ascending VAs of every chunk-aligned pool
+// header matching tag, plus the bytes swept. Chunks overlap by one header so
+// a boundary-straddling header is still seen; the overlap's duplicate hit is
+// dropped. A non-zero deadline stops the sweep between chunks (partial=true):
+// the reads are byte-bounded but not time-bounded, and the collector must
+// never wait on this scan longer than the caller budgeted.
+func (e *vmmEngine) sweepPoolTag(ranges []symbols.VARange, tag [4]byte, deadline time.Time) (hits []uint64, swept uint64, partial bool) {
+	nextReport := uint64(256 << 20)
+	start := time.Now()
+	for _, r := range ranges {
+		va := r.Start &^ uint64(symbols.PoolChunkAlign-1)
+		for va < r.End {
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				return hits, swept, true
+			}
+			n := uint64(poolSweepChunk)
+			if va+n > r.End {
+				n = r.End - va
+			}
+			b, ok := e.readPadded(va, uint32(n))
+			if ok {
+				for _, off := range symbols.ScanPoolTag(b, tag) {
+					hva := va + uint64(off)
+					if len(hits) > 0 && hits[len(hits)-1] == hva {
+						continue // overlap duplicate
+					}
+					hits = append(hits, hva)
+				}
+			}
+			swept += n
+			if swept >= nextReport {
+				fmt.Fprintf(os.Stderr, "[anamnesis] pool-tag scan: swept %d MiB in %s (%d hits so far)\n", swept>>20, time.Since(start).Round(time.Second), len(hits))
+				nextReport += 256 << 20
+			}
+			if n <= symbols.PoolHeaderSize {
+				break
+			}
+			va += n - symbols.PoolHeaderSize
+		}
+	}
+	return hits, swept, false
 }
 
 // plausiblePoolPID reads a candidate _EPROCESS's PID through the recovered
@@ -1030,6 +1138,24 @@ func (e *vmmEngine) poolScanProcesses() []uint64 {
 func (e *vmmEngine) plausiblePoolPID(ep uint64) bool {
 	pid := e.readDword(ep + uint64(e.recPIDOffset))
 	return pid != 0 && pid%4 == 0 && pid < 0x4000_0000
+}
+
+// readPadded reads [va, va+n) with unreadable pages zero-padded in place, so
+// byte positions always correspond to VAs. The binding truncates the returned
+// slice to the bytes actually READ, which cuts position-correct data after a
+// mid-buffer hole — re-extend to the request length (VMMDLL wrote the whole
+// zero-padded buffer). Paged retrieval is skipped (NoPagingIO): the pool
+// content this reads is nonpaged, so a pagefile/compressed-store round trip
+// can only cost time, never add data. ok=false when nothing was readable.
+func (e *vmmEngine) readPadded(va uint64, n uint32) ([]byte, bool) {
+	b, cb, err := e.vmm.MemReadEx(systemPID, va, n, mp.MemFlagZeroPadOnFail|mp.MemFlagNoPagingIO)
+	if err != nil || cb == 0 {
+		return nil, false
+	}
+	if uint32(cap(b)) >= n {
+		b = b[:n]
+	}
+	return b, true
 }
 
 // readDword reads a little-endian uint32 at an absolute VA (System
