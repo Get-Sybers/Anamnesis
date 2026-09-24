@@ -55,6 +55,9 @@ type vmmEngine struct {
 	recObCookie    uint8
 	recObCookieOK  bool
 	recProcTypeIdx uint8 // the kernel Process object-type index (set by the gate)
+	kImage         []byte
+	kImageVA       uint64
+	kImageTried    bool
 }
 
 type procRef struct {

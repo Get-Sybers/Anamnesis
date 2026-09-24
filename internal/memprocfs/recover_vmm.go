@@ -235,6 +235,13 @@ func (e *vmmEngine) recoverPrePass() {
 		e.gateObCookie(cookieVA)
 	}
 
+	// Function fingerprinting self-test: prove the masked-pattern scan works on
+	// THIS build's real ntoskrnl image before it is trusted to locate a
+	// non-exported routine — harvest a signature from an exported routine's own
+	// bytes, scan the module, require a unique relocation to the export's VA.
+	// A later slice reads the result to gate fingerprinted-global recovery.
+	e.fingerprintSelfTest()
+
 	if off, ok := entry.Offset(ctFunc); ok && off > 0 {
 		// Gate on EVERY load, store hits included: the offset must decode the
 		// System process's CreateTime to a plausible FILETIME, so a wrong or
@@ -263,6 +270,109 @@ func upsertOffset(offs []symbols.RecoveredOffset, o symbols.RecoveredOffset) []s
 // offset — a pseudo-accessor name so it persists and converges beside the
 // disassembled offsets without being counted toward accessor completeness.
 const tokenScanFunc = "TokenScan"
+
+// kernelImageCap bounds the ntoskrnl span read for fingerprint scanning.
+const kernelImageCap = 16 << 20
+
+// kernelImage reads the ntoskrnl module image span (base..base+ImageSize,
+// capped) for masked-pattern scanning, cached per engine. It reads the whole
+// mapped module, not an isolated .text section. baseVA is the module base — a
+// matched offset resolves to base+off.
+func (e *vmmEngine) kernelImage() (image []byte, baseVA uint64, ok bool) {
+	if e.kImage != nil {
+		return e.kImage, e.kImageVA, true
+	}
+	if e.kImageTried {
+		return nil, 0, false
+	}
+	e.kImageTried = true
+	mod, err := e.vmm.GetModuleByName(systemPID, "ntoskrnl.exe", mp.ModuleFlag(0))
+	if err != nil || mod == nil || mod.BaseAddress == 0 {
+		return nil, 0, false
+	}
+	size := int(mod.ImageSize)
+	if size <= 0 || size > kernelImageCap {
+		size = kernelImageCap
+	}
+	// Read in chunks; a paged-out tail just shortens the scan window.
+	const chunk = 1 << 20
+	buf := make([]byte, 0, size)
+	for off := 0; off < size; off += chunk {
+		n := chunk
+		if off+n > size {
+			n = size - off
+		}
+		b, cb, rerr := e.vmm.MemReadEx(systemPID, mod.BaseAddress+uint64(off), uint32(n), mp.MemFlagNone)
+		if rerr != nil || cb == 0 {
+			break
+		}
+		buf = append(buf, b[:cb]...)
+		if int(cb) < n {
+			break
+		}
+	}
+	if len(buf) == 0 {
+		return nil, 0, false
+	}
+	e.kImage, e.kImageVA = buf, mod.BaseAddress
+	return e.kImage, e.kImageVA, true
+}
+
+// fingerprintSelfTest proves the masked-pattern scanner on this build's real
+// ntoskrnl image: it harvests a signature from an exported routine (bytes read
+// via the export VA, the trailing displacement wildcarded) and requires the
+// scan to relocate it — uniquely — to the export's own address. It reports the
+// result; a later slice reads it to gate fingerprinted-global recovery.
+func (e *vmmEngine) fingerprintSelfTest() bool {
+	const probe = "PsGetProcessId" // an exported accessor: known VA = ground truth
+	knownVA, err := e.vmm.GetProcAddress(systemPID, "ntoskrnl.exe", probe)
+	if err != nil || knownVA == 0 {
+		return false
+	}
+	code, err := e.vmm.MemRead(systemPID, knownVA, 24)
+	if err != nil || len(code) < 16 {
+		return false
+	}
+	image, baseVA, ok := e.kernelImage()
+	if !ok {
+		fmt.Fprintln(os.Stderr, "[anamnesis] fingerprint self-test: ntoskrnl image unreadable")
+		return false
+	}
+	sig := harvestSignature(probe, code)
+	matchVA, off, found := symbols.MatchSignature(image, baseVA, sig)
+	if !found || matchVA != knownVA {
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test FAILED (found=%v at %#x, want %#x)\n", found, matchVA, knownVA)
+		return false
+	}
+	// Uniqueness: no second match in the remainder.
+	if _, _, dup := symbols.MatchSignature(image[off+1:], baseVA+uint64(off)+1, sig); dup {
+		fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test: %s signature not unique\n", probe)
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "[anamnesis] fingerprint self-test passed (%s relocated uniquely to %#x)\n", probe, knownVA)
+	return true
+}
+
+// harvestSignature builds a masked signature from a routine's leading bytes:
+// the whole window is pinned except a conservative wildcard over the tail,
+// where a RIP disp32 or an immediate is most likely to vary. Enough to prove
+// the scanner; real cross-build signatures are hand-authored per routine.
+func harvestSignature(name string, code []byte) symbols.Signature {
+	n := len(code)
+	if n > 16 {
+		n = 16
+	}
+	pat := append([]byte(nil), code[:n]...)
+	mask := make([]byte, n)
+	for i := range mask {
+		mask[i] = 0xFF
+	}
+	// Wildcard the last 4 bytes of the window (a likely disp32/immediate).
+	for i := n - 4; i < n && i >= 0; i++ {
+		mask[i] = 0x00
+	}
+	return symbols.Signature{Name: name, Pattern: pat, Mask: mask}
+}
 
 // fillProcess back-fills the fields the PDB-gated reads left empty, per
 // process, tagging each recovered value in Recovery as field=method.
