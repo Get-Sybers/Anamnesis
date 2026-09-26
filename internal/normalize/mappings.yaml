@@ -1,27 +1,5 @@
-# Per-plugin -> MITRE CAR object maps. This is the static delegation table the Go
-# normalizer loads (embedded via go:embed) — one entry per plugin: the CAR object
-# it yields, the action, the timestamp field, the identity that becomes the CAR
-# guid, the owning-process link, and how each raw field maps to a canonical CAR
-# property. Data only — the marker resolvers (first/basename/transport/…) and the
-# variant predicates (is_bound_socket) are named Go functions this file references.
-#
-# Source expression grammar (a prop or guid marker value):
-#   "Field"                       -> the raw field's value
-#   {first: [srcA, srcB, …]}      -> the first non-blank source
-#   {basename: src}               -> ntpath basename of src
-#   {ext: src}                    -> lowercase extension of src (no dot)
-#   {transport: src}              -> L4 protocol from a Proto string ("TCPv4"->"TCP")
-#   {family: src}                 -> address family from a Proto string ("TCPv4"->"ipv4")
-#   {user_from_hive: src}         -> the profile user parsed from a hive path
-#   {exe_path: src}               -> the executable path parsed from a command line
-#   {proc_guid: src}              -> "proc-<hex>" from an _EPROCESS offset field
-#   {const: <literal>}            -> a constant the observation itself proves
-# guid: {field: X} | {fields: [..]} | {marker: <src>} | {none: true}
-# A map with `variants` (ordered {predicate, map}) + `default` splits one plugin
-# across objects (bound socket vs. connection flow).
-
-# An anamnesis.* plugin supersedes the built-in it improves on: when the NEW plugin's
-# JSONL is present, the OLD one's is skipped at store-build time.
+# The plugin -> CAR delegation table (data only, go:embed) — expression
+# grammar, guid/variants forms and the supersedes rule: README.md.
 supersedes:
   windows.anamnesis.threads: windows.thrdscan
   windows.anamnesis.modules: windows.dlllist
