@@ -5,8 +5,11 @@ normalizer loads: one entry per plugin — the CAR object it yields, the
 action, the timestamp field, the identity that becomes the CAR guid, the
 owning-process link, and how each raw field maps to a canonical CAR
 property. **Data only** — the marker resolvers and variant predicates are
-named Go functions this package binds by name, so adding or changing a
-mapping is a data edit, never a Go change.
+named Go functions this package binds by name, so a mapping that uses the
+existing resolvers and predicates is a data edit with no Go change. A
+mapping that needs a **new** resolver or predicate adds that one Go
+function first; an unknown name is refused at load time (the package
+panics at init), never silently ignored.
 
 ## Source expression grammar
 
@@ -23,6 +26,7 @@ A prop or guid marker value is one of:
 | `{user_from_hive: src}` | the profile user parsed from a hive path |
 | `{exe_path: src}` | the executable path parsed from a command line |
 | `{proc_guid: src}` | `proc-<hex>` from an `_EPROCESS` offset field |
+| `{file_guid: src}` | `file-<hex>` from a `FILE_OBJECT` offset field — the same kernel-pointer convention as `proc_guid` |
 | `{const: <literal>}` | a constant the observation itself proves |
 
 `guid:` takes `{field: X}`, `{fields: [..]}`, `{marker: <src>}` or
