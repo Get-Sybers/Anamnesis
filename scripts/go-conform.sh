@@ -30,7 +30,8 @@ modules() {
   go work edit -json | sed -n 's/.*"DiskPath": "\(.*\)".*/\1/p'
 }
 
-for m in $(modules "$@"); do
+mapfile -t MODS < <(modules "$@")   # array preserves paths with spaces; no word-split/glob
+for m in "${MODS[@]}"; do
   d="$ROOT/${m#./}"
   name="${m#./}"; [[ "$name" == "." ]] && name="$(basename "$ROOT")"
   [[ -f "$d/go.mod" ]] || { bad "$name: no go.mod"; continue; }
