@@ -15,7 +15,7 @@ import (
 	"os"
 	"sort"
 
-	"anamnesis/internal/profile"
+	"github.com/get-sybers/anamnesis/internal/profile"
 )
 
 func main() {

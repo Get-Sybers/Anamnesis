@@ -12,11 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/enrich"
-	"anamnesis/internal/normalize"
-	"anamnesis/internal/store"
-	"anamnesis/internal/timeline"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/enrich"
+	"github.com/get-sybers/anamnesis/internal/normalize"
+	"github.com/get-sybers/anamnesis/internal/store"
+	"github.com/get-sybers/anamnesis/internal/timeline"
 )
 
 const jsonlExt = ".jsonl"

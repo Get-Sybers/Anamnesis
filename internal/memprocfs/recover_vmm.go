@@ -22,7 +22,7 @@ import (
 
 	mp "github.com/sergeyzav/gomemprocfs"
 
-	"anamnesis/internal/symbols"
+	"github.com/get-sybers/anamnesis/internal/symbols"
 )
 
 // systemPID is the Windows System process — the kernel address space vmm

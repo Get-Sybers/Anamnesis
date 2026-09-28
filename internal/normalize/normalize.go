@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/value"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/value"
 )
 
 // The profile owner from a user-hive FILE path. Covers real renderings:

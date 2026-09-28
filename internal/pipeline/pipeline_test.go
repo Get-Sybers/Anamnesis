@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/carmodel"
-	"anamnesis/internal/enrich"
-	"anamnesis/internal/normalize"
-	"anamnesis/internal/store"
-	"anamnesis/internal/timeline"
-	"anamnesis/internal/value"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/carmodel"
+	"github.com/get-sybers/anamnesis/internal/enrich"
+	"github.com/get-sybers/anamnesis/internal/normalize"
+	"github.com/get-sybers/anamnesis/internal/store"
+	"github.com/get-sybers/anamnesis/internal/timeline"
+	"github.com/get-sybers/anamnesis/internal/value"
 )
 
 func tag(ev car.Event) car.Event { ev["source_image"] = "img.mem"; return ev }

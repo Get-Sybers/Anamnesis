@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/memprocfs"
-	"anamnesis/internal/pipeline"
-	"anamnesis/internal/value"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/memprocfs"
+	"github.com/get-sybers/anamnesis/internal/pipeline"
+	"github.com/get-sybers/anamnesis/internal/value"
 )
 
 // fakeEngine is a canned Engine: it lets the collectors' record-shaping be tested

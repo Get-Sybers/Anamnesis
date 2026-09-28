@@ -1,0 +1,6 @@
+go 1.26.0
+
+// Anamnesis is a single Go module at the repository root. The workspace is the
+// default way the repo is built/tooled (go-standards.md §2); the module also
+// builds standalone with GOWORK=off (no in-repo replace directives are needed).
+use .
