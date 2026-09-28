@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/memprocfs"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/memprocfs"
 )
 
 // collectProcesses -> windows.anamnesis.processes. One row per process, keyed by the

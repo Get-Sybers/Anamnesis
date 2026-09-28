@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/carmodel"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/carmodel"
 
 	_ "modernc.org/sqlite"
 )

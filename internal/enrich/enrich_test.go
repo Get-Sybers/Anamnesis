@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/carmodel"
-	"anamnesis/internal/normalize"
-	"anamnesis/internal/value"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/carmodel"
+	"github.com/get-sybers/anamnesis/internal/normalize"
+	"github.com/get-sybers/anamnesis/internal/value"
 )
 
 // ---- helpers (mirror tests/test_car_pipeline.py) ---------------------------

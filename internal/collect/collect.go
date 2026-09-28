@@ -15,8 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"anamnesis/internal/car"
-	"anamnesis/internal/memprocfs"
+	"github.com/get-sybers/anamnesis/internal/car"
+	"github.com/get-sybers/anamnesis/internal/memprocfs"
 )
 
 type collectFn = func(memprocfs.Engine) ([]car.Record, error)

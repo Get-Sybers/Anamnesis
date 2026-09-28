@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"anamnesis/internal/collect"
-	"anamnesis/internal/memprocfs"
-	"anamnesis/internal/pipeline"
+	"github.com/get-sybers/anamnesis/internal/collect"
+	"github.com/get-sybers/anamnesis/internal/memprocfs"
+	"github.com/get-sybers/anamnesis/internal/pipeline"
 )
 
 // The env-driven batch orchestrator — the container ENTRYPOINT. Faithful port of

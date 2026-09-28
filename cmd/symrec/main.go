@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"anamnesis/internal/symbols"
+	"github.com/get-sybers/anamnesis/internal/symbols"
 )
 
 const usage = "usage: symrec <ntoskrnl.exe>  |  symrec -store <dir> <pe>...  |  symrec -fingerprint <dir> <pe> <routine> <global> [byte]"

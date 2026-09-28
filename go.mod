@@ -1,6 +1,6 @@
-module anamnesis
+module github.com/get-sybers/anamnesis
 
-go 1.25.2
+go 1.26.0
 
 require (
 	github.com/sergeyzav/gomemprocfs v0.1.3

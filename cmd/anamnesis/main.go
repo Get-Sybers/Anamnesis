@@ -19,10 +19,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"anamnesis/internal/collect"
-	"anamnesis/internal/memprocfs"
-	"anamnesis/internal/pipeline"
-	"anamnesis/internal/timeline"
+	"github.com/get-sybers/anamnesis/internal/collect"
+	"github.com/get-sybers/anamnesis/internal/memprocfs"
+	"github.com/get-sybers/anamnesis/internal/pipeline"
+	"github.com/get-sybers/anamnesis/internal/timeline"
 )
 
 // version is anamnesis's own line (a major bump from the 1.0.0 Python release: the
