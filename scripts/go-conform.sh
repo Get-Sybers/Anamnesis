@@ -30,7 +30,8 @@ modules() {
   go work edit -json | sed -n 's/.*"DiskPath": "\(.*\)".*/\1/p'
 }
 
-for m in $(modules "$@"); do
+mapfile -t MODS < <(modules "$@")   # array preserves paths with spaces; no word-split/glob
+for m in "${MODS[@]}"; do
   d="$ROOT/${m#./}"
   name="${m#./}"; [[ "$name" == "." ]] && name="$(basename "$ROOT")"
   [[ -f "$d/go.mod" ]] || { bad "$name: no go.mod"; continue; }
@@ -42,9 +43,12 @@ for m in $(modules "$@"); do
     *) bad "$name: module path $mp is not $WANT_PREFIX[/…]" ;;
   esac
 
-  # gofmt
-  unformatted=$(gofmt -l "$d")
-  [[ -z "$unformatted" ]] || bad "$name: gofmt needed: $unformatted"
+  # gofmt — a gofmt error (e.g. a parse error) fails the check, never passes silently
+  if ! unformatted=$(gofmt -l "$d" 2>/tmp/gc.fmt.err); then
+    bad "$name: gofmt errored:"; head -6 /tmp/gc.fmt.err >&2
+  elif [[ -n "$unformatted" ]]; then
+    bad "$name: gofmt needed: $unformatted"
+  fi
 
   # no exported Get* accessors (go-standards.md §6)
   getters=$(grep -rnE 'func (\([^)]*\) )?Get[A-Z]' "$d" --include=*.go 2>/dev/null | grep -v '_test.go' || true)
@@ -64,8 +68,13 @@ for m in $(modules "$@"); do
   # go:generate drift: only if the module declares any directive
   if grep -rql '//go:generate' "$d" --include=*.go 2>/dev/null; then
     ( cd "$d" && go generate ./... ) >/dev/null 2>&1
-    drift=$(cd "$ROOT" && git status --porcelain -- "${m#./}")
-    [[ -z "$drift" ]] && ok "$name: generate (no drift)" || { bad "$name: go:generate drift"; echo "$drift" >&2; }
+    if ! drift=$(cd "$ROOT" && git status --porcelain -- "${m#./}" 2>/tmp/gc.git.err); then
+      bad "$name: generate drift check — git status failed:"; head -3 /tmp/gc.git.err >&2
+    elif [[ -z "$drift" ]]; then
+      ok "$name: generate (no drift)"
+    else
+      bad "$name: go:generate drift"; echo "$drift" >&2
+    fi
   fi
 done
 
