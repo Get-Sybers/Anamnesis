@@ -1,0 +1,33 @@
+# build output
+/anamnesis
+/frameprofile
+/symrec
+*.exe
+
+# analysis output
+out/
+*.jsonl
+timeline.json
+
+# symbol / PDB caches
+anamnesis-symbols-*/
+
+# go
+/vendor/
+# Go test, coverage, and profiling artifacts
+*.test
+*.prof
+coverage.out
+*.cover
+# Go build/test cache when localized into the tree (the default GOCACHE lives
+# under ~/.cache/go-build, outside the repo). Matches only directories named
+# ".cache".
+.cache/
+# Local-only Go workspace. The module resolves its deps through go.mod and builds
+# standalone (GOWORK=off); a go.work is a per-developer convenience for editing
+# sibling repos together and is never committed.
+go.work
+go.work.sum
+
+# Go module cache
+/.go/

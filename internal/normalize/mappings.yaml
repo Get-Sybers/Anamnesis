@@ -1,0 +1,358 @@
+# The plugin -> CAR delegation table (data only, go:embed) — expression
+# grammar, guid/variants forms and the supersedes rule: README.md.
+supersedes:
+  windows.anamnesis.threads: windows.thrdscan
+  windows.anamnesis.modules: windows.dlllist
+  windows.anamnesis.network: windows.netscan
+  windows.anamnesis.sessions: windows.sessions
+
+mappings:
+  # ---- process — the hub; identity already synthesized by the plugin ----------
+  windows.anamnesis.processes:
+    object: process
+    action: create
+    ts: CreateTime
+    parent_pid: PPID
+    guid: {field: Guid}
+    props:
+      pid: PID
+      ppid: PPID
+      exe: {first: [{basename: Path}, ImageFileName]}
+      image_path: Path
+      command_line: CommandLine
+      parent_exe: {basename: ParentPath}
+      parent_image_path: ParentPath
+      user: User
+      sid: Sid
+      uid: Sid
+      current_working_directory: Cwd
+      integrity_level: IntegrityLevel
+      env_vars: EnvVars
+    keep: [Offset, ImageFileName, LoadedDlls, DllCount, Hidden, Unlinked, Terminated, ObjTypeChecked, ObjTypeConfirmed, ExitTime, LogonId, Recovery]
+
+  # ---- process TERMINATE events — the _EPROCESS records an exit time ----------
+  windows.anamnesis.terminated:
+    object: process
+    action: terminate
+    ts: ExitTime
+    parent_pid: PPID
+    guid: {field: Guid}
+    props:
+      pid: PID
+      ppid: PPID
+      exe: {first: [{basename: Path}, ImageFileName]}
+      image_path: Path
+      command_line: CommandLine
+      user: User
+      sid: Sid
+      uid: Sid
+    keep: [Offset, ImageFileName, CreateTime]
+
+  # ---- process ACCESS events -------------------------------------------------
+  windows.anamnesis.access:
+    object: process
+    action: access
+    ts: null
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {marker: {proc_guid: OwnerOffset}}
+    props:
+      pid: PID
+      exe: ProcessName
+      access_level: GrantedAccess
+      target_pid: TargetPid
+      target_name: TargetName
+      target_guid: {proc_guid: TargetOffset}
+    keep: [HandleValue]
+
+  # ---- MFT records -----------------------------------------------------------
+  windows.mftscan.MFTScan:
+    object: file
+    action: create
+    ts: Created
+    guid: {none: true}
+    props:
+      file_name: Filename
+      creation_time: Created
+      extension: {ext: Filename}
+    keep: ["Record Number", "Attribute Type", "MFT Type", Modified, Updated, Accessed, Offset, Permissions]
+
+  # ---- the anamnesis.* family: every spoke emits OwnerOffset ----------------------
+  windows.anamnesis.threads:
+    object: thread
+    action: create
+    ts: CreateTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {fields: [Offset]}
+    props:
+      tgt_pid: PID
+      tgt_tid: TID
+      start_address: Win32StartAddress
+      start_module: Win32StartPath
+      start_module_name: {basename: Win32StartPath}
+      start_function: Win32StartFunction
+      stack_base: StackBase
+      stack_limit: StackLimit
+      user_stack_base: UserStackBase
+      user_stack_limit: UserStackLimit
+    keep: [ExitTime, StartAddress, StartPath, StartFunction, Unbacked]
+
+  windows.anamnesis.modules:
+    object: module
+    action: load
+    ts: LoadTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {fields: [PID, Base]}
+    props:
+      module_path: Path
+      module_name: Name
+      base_address: Base
+      pid: PID
+    keep: [Size, LoadCount, ProcessName, Company, Description, Version]
+
+  # ---- module UNLOAD events — the kernel's unloaded-module residue -----------
+  windows.anamnesis.unloaded:
+    object: module
+    action: unload
+    ts: UnloadTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    # UnloadRaw (0 = unknown) keeps the guid stable: a nil component voids a
+    # fields-guid, and most residue entries carry no unload time.
+    guid: {fields: [PID, Base, UnloadRaw]}
+    props:
+      module_name: Name
+      base_address: Base
+      pid: PID
+    keep: [Size, Wow64, ProcessName, UnloadRaw]
+
+  windows.anamnesis.network:
+    variants:
+      - predicate: is_bound_socket
+        map:
+          object: socket
+          action: listen
+          ts: Created
+          owning_pid: PID
+          owning_offset: OwnerOffset
+          guid: {fields: [Proto, LocalAddr, LocalPort, PID]}
+          props:
+            local_address: LocalAddr
+            local_port: LocalPort
+            remote_address: ForeignAddr
+            remote_port: ForeignPort
+            protocol: {transport: Proto}
+            family: {family: Proto}
+            pid: PID
+            success: {const: true}
+          keep: [State, Offset, Owner]
+    default:
+      object: flow
+      action: start
+      ts: Created
+      owning_pid: PID
+      owning_offset: OwnerOffset
+      guid: {fields: [Proto, LocalAddr, LocalPort, ForeignAddr, ForeignPort]}
+      props:
+        src_ip: LocalAddr
+        src_port: LocalPort
+        dest_ip: ForeignAddr
+        dest_port: ForeignPort
+        transport_protocol: {transport: Proto}
+        start_time: Created
+        pid: PID
+        exe: Owner
+      keep: [State, Offset, Proto]
+
+  # A held File handle is ACCESS of the file object by the owning process
+  # (Byakugan's CAR model: file/access; same shape as the process/access rows).
+  # The guid is the FILE_OBJECT itself — one identity per kernel object; each
+  # holder is a separate access event carried by owning_*, and the handle facts
+  # (HandleValue, GrantedAccess) ride native for the relationship layer.
+  windows.anamnesis.files:
+    object: file
+    action: access
+    ts: null
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {marker: {file_guid: FileObjectOffset}}
+    props:
+      file_path: Path
+      file_name: {basename: Path}
+      extension: {ext: Path}
+      pid: PID
+    keep: [HandleValue, GrantedAccess, FileObjectOffset, OwnerOffset, ProcessName]
+
+  windows.anamnesis.sessions:
+    object: user_session
+    action: login
+    ts: CreateTime
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {fields: [LogonId]}
+    props:
+      user: User
+      login_id: LogonId
+      uid: Sid
+      login_successful: {const: true}
+    keep: [SessionId, ProcessName, Sid]
+
+  # ---- superseded built-ins (still normalized if their JSONL is present) ------
+  windows.thrdscan:
+    object: thread
+    action: create
+    ts: CreateTime
+    owning_pid: PID
+    guid: {fields: [Offset]}
+    props:
+      tgt_pid: PID
+      tgt_tid: TID
+      start_address: Win32StartAddress
+      start_module: Win32StartPath
+      start_module_name: {basename: Win32StartPath}
+    keep: [ExitTime, StartAddress, StartPath]
+
+  windows.dlllist:
+    object: module
+    action: load
+    ts: LoadTime
+    owning_pid: PID
+    guid: {fields: [PID, Base]}
+    props:
+      module_path: Path
+      module_name: Name
+      base_address: Base
+      pid: PID
+    keep: [Size, LoadCount, Process]
+
+  windows.modules:
+    object: driver
+    action: load
+    ts: null
+    guid: {fields: [Offset]}
+    props:
+      image_path: Path
+      module_name: Name
+      base_address: Base
+    keep: [Size, ServiceKey]
+
+  # &socket / &flow define the shared bound-socket + connection shapes once;
+  # netstat reuses them by alias. (anamnesis.network above adds OwnerOffset, so it is
+  # written out rather than aliased.)
+  windows.netscan:
+    variants:
+      - predicate: is_bound_socket
+        map: &socket
+          object: socket
+          action: listen
+          ts: Created
+          owning_pid: PID
+          guid: {fields: [Proto, LocalAddr, LocalPort, PID]}
+          props:
+            local_address: LocalAddr
+            local_port: LocalPort
+            remote_address: ForeignAddr
+            remote_port: ForeignPort
+            protocol: {transport: Proto}
+            family: {family: Proto}
+            pid: PID
+            success: {const: true}
+          keep: [State, Offset, Owner]
+    default: &flow
+      object: flow
+      action: start
+      ts: Created
+      owning_pid: PID
+      guid: {fields: [Proto, LocalAddr, LocalPort, ForeignAddr, ForeignPort]}
+      props:
+        src_ip: LocalAddr
+        src_port: LocalPort
+        dest_ip: ForeignAddr
+        dest_port: ForeignPort
+        transport_protocol: {transport: Proto}
+        start_time: Created
+        pid: PID
+        exe: Owner
+      keep: [State, Offset, Proto]
+
+  windows.netstat:
+    variants:
+      - predicate: is_bound_socket
+        map: *socket
+    default: *flow
+
+  windows.filescan:
+    object: file
+    action: null
+    ts: null
+    guid: {fields: [Offset]}
+    props:
+      file_path: Name
+      file_name: {basename: Name}
+      extension: {ext: Name}
+    keep: []
+
+  windows.anamnesis.registry:
+    object: registry
+    action: value_edit
+    ts: LastWrite
+    guid: {fields: [Hive, Key, ValueName]}
+    props:
+      key: Key
+      value: ValueName
+      data: ValueData
+      new_content: ValueData
+      type: ValueType
+      hive: Hive
+      user: {user_from_hive: Hive}
+    keep: []
+
+  # ---- registry ACCESS events — Key handles a process holds open --------------
+  windows.anamnesis.keys:
+    object: registry
+    action: access
+    ts: null
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    # guid on the normalized identity — the raw Path carries volatile
+    # MemProcFS hive-VA/cell annotations and stays in _native only.
+    guid: {fields: [OwnerOffset, Hive, Key]}
+    props:
+      hive: Hive
+      key: Key
+      pid: PID
+      user: {user_from_hive: Hive}
+    keep: [Path, GrantedAccess, Handles, ProcessName]
+
+  # A service enumerated from the SCM database snapshot is service/enumerate
+  # (Byakugan's CAR model) — the snapshot asserts the service's existence and
+  # recorded state, never a start/stop event.
+  windows.svcscan:
+    object: service
+    action: enumerate
+    ts: null
+    owning_pid: PID
+    owning_offset: OwnerOffset
+    guid: {fields: [Offset]}
+    props:
+      name: Name
+      image_path: {exe_path: {first: [Binary, "Binary (Registry)"]}}
+      exe: {basename: {exe_path: {first: [Binary, "Binary (Registry)"]}}}
+      command_line: "Binary (Registry)"
+      user: UserAccount
+      pid: PID
+    keep: [Order, Start, State, Type, Display, Dll, UserType]
+
+  windows.sessions:
+    object: user_session
+    action: login
+    ts: "Create Time"
+    owning_pid: "Process ID"
+    guid: {fields: ["Session ID", "User Name"]}
+    props:
+      user: "User Name"
+      login_id: "Session ID"
+      login_successful: {const: true}
+    keep: ["Session Type", Process]
