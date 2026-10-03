@@ -1,7 +1,7 @@
 //go:build memprocfs
 
 // This file is the MemProcFS-backed Engine, compiled only with `-tags memprocfs`
-// (the hardened image builds this way). It wraps github.com/sergeyzav/gomemprocfs
+// (the hardened image builds this way). It wraps github.com/Get-Sybers/gomemprocfs
 // (purego, no cgo) — the vmm native library is dlopen'd at runtime from LibPath.
 //
 // ON-TARGET VALIDATION REQUIRED: the mappings below are written against
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	mp "github.com/sergeyzav/gomemprocfs"
+	mp "github.com/Get-Sybers/gomemprocfs"
 )
 
 const defaultLib = "/opt/anamnesis/lib/vmm.so"

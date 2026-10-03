@@ -3,7 +3,7 @@ module github.com/Get-Sybers/Anamnesis
 go 1.27.1
 
 require (
-	github.com/sergeyzav/gomemprocfs v0.1.3
+	github.com/Get-Sybers/gomemprocfs v0.2.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
 )

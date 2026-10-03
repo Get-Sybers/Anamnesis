@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	mp "github.com/sergeyzav/gomemprocfs"
+	mp "github.com/Get-Sybers/gomemprocfs"
 
 	"github.com/Get-Sybers/Anamnesis/internal/symbols"
 )
