@@ -1,3 +1,5 @@
+github.com/Get-Sybers/gomemprocfs v0.2.0 h1:xk9bP8rSDxC2im1Aok3nfUEBfiOGTzRGIyZ9XO1K7bg=
+github.com/Get-Sybers/gomemprocfs v0.2.0/go.mod h1:Q9FuuYF0BfUqI9VU7a5g0xIKtiWxrf/tNCemVEegoFs=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/ebitengine/purego v0.9.0 h1:mh0zpKBIXDceC63hpvPuGLiJ8ZAa3DfrFTudmfi8A4k=
@@ -14,8 +16,6 @@ github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOF
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/sergeyzav/gomemprocfs v0.1.3 h1:CBf/gOlxZ4yP3KdgPA2z6EpwKNP+VsXmNFMjG3JbSlg=
-github.com/sergeyzav/gomemprocfs v0.1.3/go.mod h1:UreHGftGA9NztWwbolHJSA1habWPgOO6UkMbp3UuEXk=
 golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
 golang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=
 golang.org/x/sync v0.23.0 h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=
