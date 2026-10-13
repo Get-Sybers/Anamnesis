@@ -220,7 +220,7 @@ type Engine interface {
 	Close() error
 }
 
-// ProcGUID synthesizes the CAR process guid from an _EPROCESS virtual address —
+// ProcGUID synthesises the CAR process guid from an _EPROCESS virtual address —
 // "proc-<hex>", the same convention the pipeline keys on.
 func ProcGUID(eprocess uint64) string {
 	return "proc-" + strconv.FormatUint(eprocess, 16)

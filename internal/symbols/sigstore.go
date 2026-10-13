@@ -11,7 +11,7 @@ import (
 // fingerprint mode) and shipped read-only so the engine can locate a
 // non-exported routine on a build it has never seen. Unlike the offset store,
 // a signature is NOT keyed by (GUID, age): a masked pattern is authored to
-// generalize across builds, so one file per module holds them all.
+// generalise across builds, so one file per module holds them all.
 
 // SigSubdir is the directory signatures live in, under the seed root.
 const SigSubdir = "anamnesis-signatures"

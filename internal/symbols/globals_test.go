@@ -3,13 +3,13 @@ package symbols
 import "testing"
 
 func TestDecodeTypeIndex(t *testing.T) {
-	// real = raw XOR (byte)(headerVA>>8) XOR cookie; must round-trip.
-	const real = uint8(7)
+	// plain = raw XOR (byte)(headerVA>>8) XOR cookie; must round-trip.
+	const plain = uint8(7)
 	const cookie = uint8(0x9A)
 	headerVA := uint64(0xffffd8_0b12_3400) // var: uint8() truncation is runtime, not a const conversion
-	raw := real ^ uint8(headerVA>>8) ^ cookie
-	if got := DecodeTypeIndex(raw, headerVA, cookie); got != real {
-		t.Fatalf("DecodeTypeIndex = %d, want %d", got, real)
+	raw := plain ^ uint8(headerVA>>8) ^ cookie
+	if got := DecodeTypeIndex(raw, headerVA, cookie); got != plain {
+		t.Fatalf("DecodeTypeIndex = %d, want %d", got, plain)
 	}
 }
 

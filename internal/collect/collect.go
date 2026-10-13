@@ -118,7 +118,7 @@ type Result struct {
 // returns the stalled collector's name — the caller re-execs to recover.
 func Run(eng memprocfs.Engine, outDir string, names []string, timeout time.Duration) ([]Result, string) {
 	plugDir := filepath.Join(outDir, "plugins")
-	os.MkdirAll(plugDir, 0o755)
+	_ = os.MkdirAll(plugDir, 0o755)
 	var results []Result
 	for _, name := range names {
 		out := filepath.Join(plugDir, name+".jsonl")

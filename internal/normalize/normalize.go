@@ -3,7 +3,7 @@
 // Faithful port of the original Python normalize.py + mappings.py. Normalize
 // applies the plugin's map (picking the matching variant where the plugin splits
 // across objects) and returns one CAR event: car_object, car_action, timestamp,
-// the synthesized guid (the object's reuse-proof identity), owning_pid/parent_pid
+// the synthesised guid (the object's reuse-proof identity), owning_pid/parent_pid
 // (resolved to owning_guid/parent_guid during enrichment, with link_confidence),
 // the canonical CAR properties, and _native (kept fields with no CAR home).
 package normalize
