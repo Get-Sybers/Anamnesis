@@ -12,8 +12,8 @@ All notable changes are documented here, following
   shuffled tests with coverage, `go mod tidy -diff`, the `memprocfs` build
   tag, Windows and macOS cross-compiles, a `go:generate` drift check and
   `scripts/structlint.sh`), `make lint` (golangci-lint v2, `.golangci.yml`)
-  and `make vuln` (govulncheck), run by the new `CI` workflow on every push
-  and pull request — on amd64 and arm64 — with `all_green` as the one
+  and `make vuln` (govulncheck), run by the new `CI` workflow on pull requests
+  and `main` — on amd64 and arm64 — with `all_green` as the one
   required status check. `scripts/go-conform.sh` now gates a single-module
   repository too: without a `go.work` it used to find no modules and pass
   with zero checks.
