@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"strings"
 
+	_ "modernc.org/sqlite" // registers the sqlite driver for database/sql
+
 	"github.com/Get-Sybers/Anamnesis/internal/car"
 	"github.com/Get-Sybers/Anamnesis/internal/carmodel"
-
-	_ "modernc.org/sqlite" // registers the sqlite driver for database/sql
 )
 
 // header is the common event header on every object table.

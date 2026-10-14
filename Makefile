@@ -22,7 +22,7 @@ BUILD_TAGS ?= memprocfs
 CROSS_TARGETS ?= windows/amd64 darwin/arm64
 export VET_FLAGS TEST_FLAGS BUILD_TAGS CROSS_TARGETS
 
-.PHONY: build test vet fmt fmt-check tidy generate conform lint structlint vuln upgrade clean
+.PHONY: build build-memprocfs test vet fmt fmt-check tidy generate conform lint structlint vuln upgrade clean
 
 build: ## build every package, then the command (static, CGO off)
 	$(GO) build ./...
