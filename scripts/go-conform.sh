@@ -1,89 +1,154 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# go-conform.sh — the Go conformance gate (go-standards.md §12).
+# go-conform.sh — the Go conformance gate (go-standards.md §12, §14;
+# build-and-test.md §3.2). One command, exit non-zero on any failure, run by
+# CI and locally as `make conform`.
 #
-# Runs, across every module in the workspace: a module-path check, gofmt -l,
-# go vet, go build, go test, a go:generate drift check, and a structural lint
-# (no exported Get* accessors). For anamnesis it also builds the optional
-# native MemProcFS backend behind its build tag (purego, still CGO_ENABLED=0),
-# so the tagged path is gated too. Exits non-zero on any failure.
+# For every module (the go.work modules, or the module at the repository
+# root), in order:
+#   gofmt -l            on the tracked Go files (never a cache or vendor tree)
+#   go vet              (+ VET_FLAGS)
+#   go build ./...
+#   go test             (TEST_FLAGS: -count=1 -shuffle=on -cover)
+#   go mod tidy -diff   go.mod / go.sum drift
+#   BUILD_TAGS          each extra tag set must vet, build and test too (§9)
+#   CROSS_TARGETS       each GOOS/GOARCH pair must build with CGO_ENABLED=0
+#   go generate         then a drift check, when the module declares a directive (§5)
+# then scripts/structlint.sh: module path, layout, naming, duplication and the
+# must-have files.
 #
-# Usage: scripts/go-conform.sh [module-dir ...]   (default: all workspace modules)
+# golangci-lint (.golangci.yml) and govulncheck are the `lint` and `vuln`
+# targets; CI runs them beside this gate through the official actions.
+#
+# Usage: scripts/go-conform.sh [module-dir ...]   (default: every module)
+# The knobs come from the Makefile, exported: VET_FLAGS TEST_FLAGS BUILD_TAGS
+# CROSS_TARGETS.
 # ==============================================================================
 set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.." || exit 2
 ROOT="$PWD"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-  OK=$'\033[38;5;172m'; ERR=$'\033[38;5;167m'; DIM=$'\033[38;5;245m'; RST=$'\033[0m'
-else OK= ERR= DIM= RST=; fi
-pass=0; fail=0
-ok()   { printf '%s[ ok ]%s %s\n'   "$OK"  "$RST" "$*"; pass=$((pass+1)); }
-bad()  { printf '%s[fail]%s %s\n'   "$ERR" "$RST" "$*" >&2; fail=$((fail+1)); }
-note() { printf '       %s%s%s\n'   "$DIM" "$*" "$RST"; }
+  OK=$'\033[38;5;172m' ERR=$'\033[38;5;167m' DIM=$'\033[38;5;245m' RST=$'\033[0m'
+else
+  OK='' ERR='' DIM='' RST=''
+fi
+pass=0 fail=0
+ok() {
+  printf '%s[ ok ]%s %s\n' "$OK" "$RST" "$*"
+  pass=$((pass + 1))
+}
+bad() {
+  printf '%s[fail]%s %s\n' "$ERR" "$RST" "$*" >&2
+  fail=$((fail + 1))
+}
+note() { printf '       %s%s%s\n' "$DIM" "$*" "$RST"; }
 
-WANT_PREFIX="github.com/Get-Sybers/Anamnesis"
+TEST_FLAGS="${TEST_FLAGS:--count=1 -shuffle=on -cover}"
+read -ra test_flags <<<"$TEST_FLAGS"
+read -ra vet_flags <<<"${VET_FLAGS:-}"
+read -ra build_tags <<<"${BUILD_TAGS:-}"
+read -ra cross_targets <<<"${CROSS_TARGETS:-}"
 
-# workspace modules (from go.work), or the args given
+# every module: the arguments given, else the go.work modules, else the root
 modules() {
-  if [[ $# -gt 0 ]]; then printf '%s\n' "$@"; return; fi
-  go work edit -json | sed -n 's/.*"DiskPath": "\(.*\)".*/\1/p'
+  if [[ $# -gt 0 ]]; then
+    printf '%s\n' "$@"
+  elif [[ -f go.work ]]; then
+    go work edit -json | sed -n 's/.*"DiskPath": "\(.*\)".*/\1/p'
+  else
+    echo .
+  fi
 }
 
-mapfile -t MODS < <(modules "$@")   # array preserves paths with spaces; no word-split/glob
+# check <label> <dir> <command...> — passes on exit 0; on failure the first
+# lines of the output (the per-package test noise filtered) are shown
+check() {
+  local label=$1 dir=$2 out
+  shift 2
+  if out=$(cd "$dir" && "$@" 2>&1); then
+    ok "$label"
+  else
+    bad "$label"
+    printf '%s\n' "$out" | grep -vE '^(ok|\?) ' | head -12 | sed 's/^/       /' >&2
+  fi
+}
+
+mapfile -t MODS < <(modules "$@")
 for m in "${MODS[@]}"; do
-  d="$ROOT/${m#./}"
-  name="${m#./}"; [[ "$name" == "." ]] && name="$(basename "$ROOT")"
-  [[ -f "$d/go.mod" ]] || { bad "$name: no go.mod"; continue; }
+  rel="${m#./}"
+  rel="${rel%/}"
+  if [[ -z "$rel" || "$rel" == "." ]]; then
+    d="$ROOT"
+    name="$(basename "$ROOT")"
+  else
+    d="$ROOT/$rel"
+    name="$rel"
+  fi
+  if [[ ! -f "$d/go.mod" ]]; then
+    bad "$name: no go.mod"
+    continue
+  fi
 
-  # module path convention
-  mp=$(sed -n 's/^module //p' "$d/go.mod")
-  case "$mp" in
-    "$WANT_PREFIX"|"$WANT_PREFIX"/*) : ;;
-    *) bad "$name: module path $mp is not $WANT_PREFIX[/…]" ;;
-  esac
-
-  # gofmt — a gofmt error (e.g. a parse error) fails the check, never passes silently
-  # tracked files only: a bare `gofmt -l` filesystem walk would also scan a
-  # warm CI module cache (GOPATH inside the checkout)
-  if ! unformatted=$(cd "$d" && git ls-files -z -- '*.go' | xargs -0 -r gofmt -l 2>/tmp/gc.fmt.err); then
-    bad "$name: gofmt errored:"; head -6 /tmp/gc.fmt.err >&2
+  # gofmt on the tracked files; a parse error fails, never passes silently
+  if ! unformatted=$(cd "$d" && git ls-files -z -- '*.go' | xargs -0 -r gofmt -l 2>&1); then
+    bad "$name: gofmt errored:"
+    printf '%s\n' "$unformatted" | head -6 | sed 's/^/       /' >&2
   elif [[ -n "$unformatted" ]]; then
-    bad "$name: gofmt needed: $unformatted"
+    bad "$name: gofmt needed (make fmt): ${unformatted//$'\n'/ }"
+  else
+    ok "$name: gofmt"
   fi
 
-  # no exported Get* accessors (go-standards.md §6)
-  getters=$(cd "$d" && git ls-files -z -- '*.go' | xargs -0 -r grep -nE 'func (\([^)]*\) )?Get[A-Z]' 2>/dev/null | grep -v '_test.go' || true)
-  [[ -z "$getters" ]] || bad "$name: exported Get* accessor(s):"$'\n'"$getters"
+  check "$name: go vet ${VET_FLAGS:-}" "$d" go vet "${vet_flags[@]}" ./...
+  check "$name: go build" "$d" go build ./...
+  check "$name: go test $TEST_FLAGS" "$d" go test "${test_flags[@]}" ./...
+  check "$name: go mod tidy -diff" "$d" go mod tidy -diff
 
-  ( cd "$d" && go vet ./... ) 2>/tmp/gc.err   && ok "$name: vet"   || { bad "$name: vet";   head -6 /tmp/gc.err >&2; }
-  ( cd "$d" && go build ./... ) 2>/tmp/gc.err  && ok "$name: build" || { bad "$name: build"; head -6 /tmp/gc.err >&2; }
-  ( cd "$d" && go test ./... >/tmp/gc.out 2>&1 ) && ok "$name: test" || { bad "$name: test"; grep -E '^(FAIL|---|panic)' /tmp/gc.out | head -8 >&2; }
+  for tags in "${build_tags[@]}"; do
+    check "$name: go vet -tags $tags" "$d" go vet "${vet_flags[@]}" -tags "$tags" ./...
+    check "$name: go build -tags $tags" "$d" env CGO_ENABLED=0 go build -tags "$tags" ./...
+    check "$name: go test -tags $tags" "$d" env CGO_ENABLED=0 go test "${test_flags[@]}" -tags "$tags" ./...
+  done
 
-  # optional native backend: must still compile behind its tag (purego dlopen,
-  # CGO_ENABLED=0 — the shared library is only needed at runtime).
-  if grep -rql '//go:build memprocfs' "$d" --include=*.go 2>/dev/null; then
-    ( cd "$d" && CGO_ENABLED=0 go build -tags memprocfs ./... ) 2>/tmp/gc.err \
-      && ok "$name: build (-tags memprocfs)" || { bad "$name: build (-tags memprocfs)"; head -6 /tmp/gc.err >&2; }
-    ( cd "$d" && CGO_ENABLED=0 go vet -tags memprocfs ./... ) 2>/tmp/gc.err \
-      && ok "$name: vet (-tags memprocfs)" || { bad "$name: vet (-tags memprocfs)"; head -6 /tmp/gc.err >&2; }
-    ( cd "$d" && CGO_ENABLED=0 go test -tags memprocfs ./... >/tmp/gc.out 2>&1 ) \
-      && ok "$name: test (-tags memprocfs)" || { bad "$name: test (-tags memprocfs)"; grep -E '^(FAIL|---|panic)' /tmp/gc.out | head -8 >&2; }
-  fi
+  for target in "${cross_targets[@]}"; do
+    check "$name: go build GOOS=${target%/*} GOARCH=${target#*/}" "$d" \
+      env CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
+  done
 
-  # go:generate drift: only if the module declares any directive
-  if grep -rql '//go:generate' "$d" --include=*.go 2>/dev/null; then
-    ( cd "$d" && go generate ./... ) >/dev/null 2>&1
-    if ! drift=$(cd "$ROOT" && git status --porcelain -- "${m#./}" 2>/tmp/gc.git.err); then
-      bad "$name: generate drift check — git status failed:"; head -3 /tmp/gc.git.err >&2
-    elif [[ -z "$drift" ]]; then
-      ok "$name: generate (no drift)"
+  # go:generate drift, when the module declares a directive: a generated
+  # artefact that differs from its data file fails (go-standards §5)
+  if (cd "$d" && git ls-files -z -- '*.go' | xargs -0 -r grep -l '^//go:generate' | grep -q .); then
+    before=$(cd "$d" && git status --porcelain -- . | sort)
+    if gen_out=$(cd "$d" && go generate ./... 2>&1); then
+      after=$(cd "$d" && git status --porcelain -- . | sort)
+      drift=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
+      if [[ -z "$drift" ]]; then
+        ok "$name: go generate (no drift)"
+      else
+        bad "$name: go generate drift — commit the regenerated files:"
+        printf '%s\n' "$drift" | sed 's/^/       /' >&2
+      fi
     else
-      bad "$name: go:generate drift"; echo "$drift" >&2
+      bad "$name: go generate failed"
+      printf '%s\n' "$gen_out" | head -6 | sed 's/^/       /' >&2
     fi
+  else
+    note "$name: no go:generate directive (drift check not applicable)"
   fi
 done
 
+# the structural lint: its own report lines, one gate
+if "$ROOT/scripts/structlint.sh"; then
+  ok "structlint"
+else
+  bad "structlint"
+fi
+
 echo
-if [[ $fail -eq 0 ]]; then printf '%sconform: %d checks passed%s\n' "$OK" "$pass" "$RST"; exit 0
-else printf '%sconform: %d passed, %d FAILED%s\n' "$ERR" "$pass" "$fail" "$RST"; exit 1; fi
+if [[ $fail -eq 0 ]]; then
+  printf '%sconform: %d checks passed%s\n' "$OK" "$pass" "$RST"
+  exit 0
+fi
+printf '%sconform: %d passed, %d FAILED%s\n' "$ERR" "$pass" "$fail" "$RST"
+exit 1

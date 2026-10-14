@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"strings"
 
+	_ "modernc.org/sqlite" // registers the sqlite driver for database/sql
+
 	"github.com/Get-Sybers/Anamnesis/internal/car"
 	"github.com/Get-Sybers/Anamnesis/internal/carmodel"
-
-	_ "modernc.org/sqlite"
 )
 
 // header is the common event header on every object table.
@@ -120,7 +120,7 @@ func (s *Store) InsertEvents(events []car.Event) (int, error) {
 			for i, c := range cs {
 				names[i] = q(c)
 			}
-			st, err = tx.Prepare("INSERT INTO " + q(obj) + " (" + strings.Join(names, ", ") +
+			st, err = tx.Prepare("INSERT INTO " + q(obj) + " (" + strings.Join(names, ", ") + //nolint:gosec // G202: q quotes an identifier — the CAR object name a collector stamped on the event, never evidence content
 				") VALUES (" + ph + ")")
 			if err != nil {
 				tx.Rollback()
@@ -172,7 +172,7 @@ func (s *Store) InsertContext(image, plugin string, records []car.Record) error 
 // IterObject returns every event row of one object, as events (native JSON
 // decoded, car_object set).
 func (s *Store) IterObject(obj string) ([]car.Event, error) {
-	rows, err := s.db.Query("SELECT * FROM " + q(obj) + " ORDER BY event_id")
+	rows, err := s.db.Query("SELECT * FROM " + q(obj) + " ORDER BY event_id") //nolint:gosec // G202: q quotes an identifier — a CAR object name from the model, never evidence content
 	if err != nil {
 		return nil, err
 	}

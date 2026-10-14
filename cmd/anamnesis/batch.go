@@ -163,7 +163,7 @@ func runBatch() int {
 		fmt.Fprintln(os.Stderr, sum.Diagnostics)
 	}
 	enc := json.NewEncoder(os.Stdout)
-	enc.Encode(sum)
+	_ = enc.Encode(sum)
 	if sum.Error != "" {
 		return 2
 	}
@@ -201,7 +201,7 @@ func process(inputDir, outDir string, plugins []string, force bool) summary {
 	for idx, img := range images {
 		rel, _ := filepath.Rel(inputDir, img)
 		dest := filepath.Join(outDir, cleanName(rel))
-		os.MkdirAll(dest, 0o755)
+		_ = os.MkdirAll(dest, 0o755)
 		pi := perImage{Image: rel, Produced: []string{}, Empty: []string{}}
 
 		var todo []string
@@ -277,7 +277,7 @@ func runImage(img, dest string, todo []string) (string, string) {
 	})
 	if err != nil {
 		logln("engine open failed: " + err.Error())
-		os.WriteFile(logPath, []byte(log.String()), 0o644)
+		_ = os.WriteFile(logPath, []byte(log.String()), 0o644)
 		return tail(log.String(), 20), ""
 	}
 
@@ -290,7 +290,7 @@ func runImage(img, dest string, todo []string) (string, string) {
 		}
 	}
 	if stalled != "" {
-		os.WriteFile(logPath, []byte(log.String()), 0o644)
+		_ = os.WriteFile(logPath, []byte(log.String()), 0o644)
 		return tail(log.String(), 20), stalled
 	}
 	eng.Close()
@@ -300,7 +300,7 @@ func runImage(img, dest string, todo []string) (string, string) {
 	} else {
 		st.Close()
 	}
-	os.WriteFile(logPath, []byte(log.String()), 0o644)
+	_ = os.WriteFile(logPath, []byte(log.String()), 0o644)
 	return tail(log.String(), 20), ""
 }
 
@@ -318,7 +318,7 @@ func isMemoryImage(name string) bool {
 
 func discover(memoryDir string) []string {
 	var found []string
-	filepath.WalkDir(memoryDir, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(memoryDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}

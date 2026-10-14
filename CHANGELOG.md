@@ -6,6 +6,29 @@ All notable changes are documented here, following
 
 ## [Unreleased]
 
+### Added
+- The conformance gate of the get-sybers standard (DX_DFIR
+  `docs/reference/build-and-test.md`): `make conform` (gofmt, vet, build,
+  shuffled tests with coverage, `go mod tidy -diff`, the `memprocfs` build
+  tag, Windows and macOS cross-compiles, a `go:generate` drift check and
+  `scripts/structlint.sh`), `make lint` (golangci-lint v2, `.golangci.yml`)
+  and `make vuln` (govulncheck), run by the new `CI` workflow on pull requests
+  and `main` — on amd64 and arm64 — with `all_green` as the one
+  required status check. `scripts/go-conform.sh` now gates a single-module
+  repository too: without a `go.work` it used to find no modules and pass
+  with zero checks.
+- Repository hygiene: `.editorconfig`, `.gitattributes`, `.shellcheckrc`,
+  Dependabot (actions and Go modules, weekly, grouped), `CODEOWNERS`, a
+  security policy and a pull-request template.
+
+### Fixed
+- The findings the new lint gate surfaced, none of which changes behaviour:
+  best-effort writes (the summary and plugin-list lines, output directories,
+  the engine log, the memory-image walk) explicitly discarded; the sqlite
+  driver import carries its justification; the two table-name SQL
+  concatenations carry a reasoned `nolint`; a test constant that shadowed the
+  `real` builtin renamed; comment spellings.
+
 ### Changed
 - **Breaking: the engine is always offline — the runtime symbol options are
   gone.** The `--symbols` / `--symbols-online` flags, the

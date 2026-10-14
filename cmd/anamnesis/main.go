@@ -65,7 +65,7 @@ func runSingle(argv []string) int {
 	}
 	if listPlugins {
 		enc := json.NewEncoder(os.Stdout)
-		enc.Encode(collect.Names())
+		_ = enc.Encode(collect.Names())
 		return 0
 	}
 	if memory == "" || out == "" {
@@ -76,7 +76,7 @@ func runSingle(argv []string) int {
 		fmt.Fprintf(os.Stderr, "memory image not found: %s\n", memory)
 		return 2
 	}
-	os.MkdirAll(out, 0o755)
+	_ = os.MkdirAll(out, 0o755)
 
 	names := collect.Names()
 	if plugins != "" {

@@ -132,7 +132,7 @@ func seedOne(dir, path string) error {
 // harvest authors a fingerprint signature for a routine referencing a global
 // from a reference kernel PE and writes it into the signature store. routine
 // is resolved by export name; global is the name the routine's first RIP
-// operand references. The signature masks the disp32, so it generalizes
+// operand references. The signature masks the disp32, so it generalises
 // across builds. Non-exported routines need no build-time harvest at all:
 // the engine authors their signatures in-image at runtime (anchor recovery).
 func harvest(dir, pePath, routine, global string, byteOperand bool) int {

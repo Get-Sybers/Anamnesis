@@ -28,7 +28,7 @@ type Signature struct {
 // it locates the routine's first RIP-relative operand (the reference to the
 // named global), pins the whole window up to and including that instruction,
 // and wildcards exactly the disp32 — the four bytes that move with the global
-// across builds. This is what makes a harvested signature generalize: the code
+// across builds. This is what makes a harvested signature generalise: the code
 // shape is pinned, the build-specific address is not. ok=false when no RIP
 // operand is found in the window (nothing build-portable to key on).
 func BuildSignature(name, global string, code []byte, byteOperand bool) (Signature, bool) {
